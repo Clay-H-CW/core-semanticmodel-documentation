@@ -399,6 +399,16 @@ section {
   font-weight: 600;
 }
 
+/* Generated but not confirmed against the model — either validation never ran, or it
+   found a problem. Amber, not green: this must not read as the same trust signal as
+   .generated, or the badge stops meaning anything. */
+.provenance.unverified {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+  font-weight: 600;
+}
+
 /* ---- verification banner ---------------------------------------------------------- */
 
 .verification {

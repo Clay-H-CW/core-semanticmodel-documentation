@@ -236,6 +236,11 @@ def test_verification_banner_reports_absent_narrative(ir):
     assert "extracted facts only" in html
 
 
+def test_footer_legend_omits_narrative_marker_when_there_is_no_narrative(ir):
+    html = render_guide(ir, "technical")
+    assert "Narrative sections are marked" not in html
+
+
 def test_verification_banner_reports_checks_when_validated(enriched_ir):
     html = render_guide(enriched_ir, "technical")
     assert 'class="verification pass"' in html
@@ -258,6 +263,36 @@ def test_narrative_is_marked_as_generated(enriched_ir):
     html = render_guide(enriched_ir, "business")
     assert "Tracks service delivery against funded programs." in html
     assert "generated &amp; verified" in html
+
+
+def test_narrative_without_a_validation_pass_is_not_claimed_verified(ir):
+    # Narrative can be attached without validation ever running (e.g. a hand-edited IR
+    # that bypassed `semdoc narrative apply`). The badge must not claim "verified" for
+    # a check that never happened.
+    narrative = Narrative(model_purpose="Tracks services.")
+    ir_unchecked = ir.model_copy(update={"narrative": narrative, "validation": None})
+
+    html = render_guide(ir_unchecked, "business")
+
+    assert "generated &amp; verified" not in html
+    assert "generated — not yet verified" in html
+    assert 'class="provenance unverified"' in html
+
+
+def test_narrative_with_failed_validation_is_flagged_not_verified(ir):
+    # If identifiers failed and the narrative was attached anyway (--force), the badge
+    # must say so rather than silently claiming success.
+    narrative = Narrative(model_purpose="Tracks services.")
+    failed_validation = ValidationReport(
+        identifiers_checked=3, identifiers_failed=["unresolved reference: [Fake Measure]"]
+    )
+    ir_failed = ir.model_copy(update={"narrative": narrative, "validation": failed_validation})
+
+    html = render_guide(ir_failed, "business")
+
+    assert "generated &amp; verified" not in html
+    assert "generated — unverified" in html
+    assert 'class="provenance unverified"' in html
 
 
 def test_generated_dax_shows_execution_result(enriched_ir):
