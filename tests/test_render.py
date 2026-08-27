@@ -234,3 +234,23 @@ def test_narrative_is_marked_as_generated(enriched_ir):
 def test_generated_dax_shows_execution_result(enriched_ir):
     html = render_guide(enriched_ir, "business")
     assert "executed successfully" in html
+
+
+def test_questions_section_does_not_overclaim_dax_execution_when_none_exists(ir):
+    # A narrative can legitimately answer questions with field guidance and no DAX at
+    # all (safer than fabricating an unverified snippet). The section blurb must not
+    # then claim "every DAX snippet was executed" — there are none to have executed.
+    narrative_no_dax = Narrative(
+        questions_answered=[
+            AnsweredQuestion(question="How many clients?", approach="Use the Client measure.")
+        ]
+    )
+    ir_no_dax = ir.model_copy(
+        update={
+            "narrative": narrative_no_dax,
+            "validation": ValidationReport(identifiers_checked=1),
+        }
+    )
+    html = render_guide(ir_no_dax, "business")
+    assert "was executed against it" not in html
+    assert "checked against the model" in html

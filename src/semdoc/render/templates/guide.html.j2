@@ -217,7 +217,16 @@
       <div>
         <p class="eyebrow">Getting answers</p>
         <h2 class="section-title">What you can answer with this model</h2>
-        <p class="section-note">Every field named below exists in the model, and every DAX snippet was executed against it before publishing.</p>
+        <p class="section-note">
+          {%- if validation and validation.ok -%}
+          Every field named below has been checked against the model.
+          {%- if has_dax_snippets %} Any DAX shown is marked as executed only where it actually ran successfully.{% endif -%}
+          {%- elif validation -%}
+          Some identifiers below did not check out against the model — see the banner above before relying on them.
+          {%- else -%}
+          Field names below have not yet been checked against the model definition.
+          {%- endif -%}
+        </p>
       </div>
       <ul class="qa-list">
         {%- for item in narrative.questions_answered %}

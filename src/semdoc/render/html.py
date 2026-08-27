@@ -125,6 +125,9 @@ def _context(
         "visible_measures": [m for m in model.all_measures if not m.is_hidden],
         "ordered_measures": _ordered_measures(ir),
         "date_table": next((t for t in model.tables if t.is_date_table), None),
+        "has_dax_snippets": bool(
+            ir.narrative and any(q.dax for q in ir.narrative.questions_answered)
+        ),
         "disconnected_tables": [
             t for t in visible_tables if t.kind is TableKind.DISCONNECTED
         ],
