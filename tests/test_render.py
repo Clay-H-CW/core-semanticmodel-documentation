@@ -105,14 +105,11 @@ def test_renders_without_unresolved_template_syntax(ir, variant):
     assert "Undefined" not in html
 
 
-def test_standalone_wraps_document_fragment_does_not(ir):
-    assert render_guide(ir, "technical", standalone=True).startswith("<!doctype html>")
-
-    fragment = render_guide(ir, "technical", standalone=False)
-    assert "<!doctype" not in fragment.lower()
-    assert "<body" not in fragment.lower()
-    # The Artifact host reads the title from the fragment.
-    assert "<title>Case Services Analytics</title>" in fragment
+def test_renders_a_complete_html_document(ir):
+    html = render_guide(ir, "technical")
+    assert html.startswith("<!doctype html>")
+    assert "<title>Case Services Analytics</title>" in html
+    assert html.rstrip().endswith("</html>")
 
 
 @pytest.mark.parametrize("variant", ["technical", "business"])
@@ -141,31 +138,20 @@ def test_inline_mermaid_source_is_not_escaped(ir, monkeypatch):
     assert 'var x = "quoted" && 1 < 2;' in html
 
 
-def test_fragment_omits_mermaid_engine(ir):
-    # Artifacts render Mermaid natively; shipping 3.5 MB of it would be waste.
-    fragment = render_guide(ir, "technical", standalone=False)
-    assert "vendor/mermaid.min.js" not in fragment
-    assert "mermaid.initialize" not in fragment
-
-
-def test_standalone_links_mermaid_engine(ir):
-    html = render_guide(ir, "technical", standalone=True)
+def test_default_mermaid_mode_links_the_engine(ir):
+    html = render_guide(ir, "technical")
     assert 'src="vendor/mermaid.min.js"' in html
     assert "mermaid.initialize" in html
 
 
-def test_fragment_omits_chat_widget(ir):
-    # The widget calls a same-origin /api/chat that only `semdoc serve` provides. An
-    # Artifact host has no such backend, so shipping the widget there would be dead UI.
-    # (The stylesheet's #chat-widget CSS rule is inlined either way — harmless, since
-    # the element it targets is never emitted — so this checks markup, not the ruleset.)
-    fragment = render_guide(ir, "technical", standalone=False)
-    assert 'id="chat-widget"' not in fragment
-    assert "/api/chat" not in fragment
+def test_no_diagrams_mode_omits_the_engine(ir):
+    html = render_guide(ir, "technical", mermaid_mode="none")
+    assert "vendor/mermaid.min.js" not in html
+    assert "mermaid.initialize" not in html
 
 
-def test_standalone_includes_chat_widget(ir):
-    html = render_guide(ir, "technical", standalone=True)
+def test_guide_includes_chat_widget(ir):
+    html = render_guide(ir, "technical")
     assert 'id="chat-widget"' in html
     assert "/api/chat" in html
     assert "Ask about Case Services Analytics" in html

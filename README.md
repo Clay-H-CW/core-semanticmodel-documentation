@@ -70,21 +70,18 @@ against a stored IR. Add `--save-tmsl` to keep the raw `model.bim` for use as a 
 |---|---|
 | `out/guide-technical.html` | Report builders and developers — full column inventory with data types, verbatim DAX, RLS filter expressions, warehouse lineage, relationship table |
 | `out/guide-business.html` | End users — what the model answers and how to build it; internal keys, DAX bodies, and warehouse detail omitted |
-| `out/guide-*.artifact.html` | Same content as a body fragment, if you ever choose to publish it somewhere that supplies the document skeleton |
-| `out/vendor/mermaid.min.js` | Diagram renderer for the standalone guides |
+| `out/vendor/mermaid.min.js` | Diagram renderer, shared by both guides |
 | `out/model-ir.json` | The intermediate representation everything downstream reads |
 
 Diagrams are authored as Mermaid source, so they also render natively in GitHub/Azure
 DevOps markdown and stay diffable in Git — no headless browser or image pipeline.
 
-The standalone guides render diagrams locally by loading a vendored Mermaid bundle
-(downloaded once, cached in `~/.semdoc/vendor`). Options:
+The guides render diagrams locally by loading a vendored Mermaid bundle (downloaded once,
+cached in `~/.semdoc/vendor`). Options:
 
 - `--inline-assets` embeds the bundle in each guide for a genuinely single-file document,
   at ~3.5 MB extra per file.
 - `--no-diagrams` skips it entirely; guides then display diagram source as text.
-
-The Artifact fragments never ship Mermaid, since that host renders it natively.
 
 Diagrams follow the page theme, including redrawing when the viewer switches between
 light and dark.

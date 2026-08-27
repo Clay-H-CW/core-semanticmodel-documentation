@@ -7,9 +7,8 @@ Two audience variants come out of one template (see D-audience in docs/design.md
 - `business`  — what the model answers and how to build it; hidden columns, key columns,
   and DAX bodies are left out.
 
-`standalone=True` emits a complete HTML document for opening as a local file.
-`standalone=False` emits a body fragment for publishing as an Artifact, where the host
-supplies the document skeleton and renders the Mermaid blocks natively.
+Always a complete, self-contained HTML document, meant to be opened locally or served by
+`semdoc serve` — this project keeps everything local rather than publishing anywhere.
 """
 
 from __future__ import annotations
@@ -122,7 +121,6 @@ def _build_environment() -> Environment:
 def _context(
     ir: ModelIR,
     variant: str,
-    standalone: bool,
     mermaid_mode: str,
     mermaid_src_url: str,
 ) -> dict:
@@ -160,7 +158,6 @@ def _context(
         "narrative": ir.narrative,
         "validation": ir.validation,
         "variant": variant,
-        "standalone": standalone,
         # The model's own name is distinctive and identifies the page in a gallery;
         # appending "Model Guide" would only add a generic explainer.
         "page_title": model.name,
@@ -203,26 +200,18 @@ def _context(
 def render_guide(
     ir: ModelIR,
     variant: str = "technical",
-    standalone: bool = True,
     *,
-    mermaid_mode: str | None = None,
+    mermaid_mode: str = "link",
     mermaid_src_url: str = "vendor/mermaid.min.js",
 ) -> str:
     if variant not in VARIANTS:
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
-
-    # A fragment is destined for an Artifact, which renders Mermaid natively; a standalone
-    # file has to bring its own.
-    if mermaid_mode is None:
-        mermaid_mode = "link" if standalone else "none"
     if mermaid_mode not in MERMAID_MODES:
         raise ValueError(f"mermaid_mode must be one of {MERMAID_MODES}, got {mermaid_mode!r}")
 
     env = _build_environment()
     template = env.get_template("guide.html.j2")
-    return template.render(
-        **_context(ir, variant, standalone, mermaid_mode, mermaid_src_url)
-    )
+    return template.render(**_context(ir, variant, mermaid_mode, mermaid_src_url))
 
 
 def write_guides(
@@ -232,11 +221,11 @@ def write_guides(
     inline_assets: bool = False,
     with_diagrams: bool = True,
 ) -> dict[str, Path]:
-    """Write both audience variants, standalone and fragment, into `out_dir`.
+    """Write both audience variants into `out_dir`.
 
-    `with_diagrams` installs the Mermaid bundle so the standalone files render diagrams
-    when opened directly from disk. Set it False for an offline run with no cached bundle;
-    the pages then show diagram source as text instead of failing.
+    `with_diagrams` installs the Mermaid bundle so the guides render diagrams when opened
+    directly from disk. Set it False for an offline run with no cached bundle; the pages
+    then show diagram source as text instead of failing.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
@@ -248,19 +237,8 @@ def write_guides(
             written["mermaid"] = assets.install_mermaid(out_dir)
 
     for variant in VARIANTS:
-        standalone_path = out_dir / f"guide-{variant}.html"
-        standalone_path.write_text(
-            render_guide(ir, variant, standalone=True, mermaid_mode=mermaid_mode),
-            encoding="utf-8",
-        )
-        written[variant] = standalone_path
-
-        # Fragment form, ready to hand to the Artifact publisher. Never ships Mermaid.
-        fragment_path = out_dir / f"guide-{variant}.artifact.html"
-        fragment_path.write_text(
-            render_guide(ir, variant, standalone=False, mermaid_mode="none"),
-            encoding="utf-8",
-        )
-        written[f"{variant}-artifact"] = fragment_path
+        path = out_dir / f"guide-{variant}.html"
+        path.write_text(render_guide(ir, variant, mermaid_mode=mermaid_mode), encoding="utf-8")
+        written[variant] = path
 
     return written

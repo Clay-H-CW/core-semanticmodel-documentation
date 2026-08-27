@@ -7,9 +7,7 @@
     - "business":  what the model answers and how to build it, with implementation
       detail and internal keys omitted.
 
-  `standalone` controls whether a full HTML document is emitted (for opening as a local
-  file) or a body fragment (for publishing as an Artifact, where the host supplies the
-  document skeleton).
+  Always a complete, self-contained HTML document — this only ever runs locally.
 -#}
 {#- `validation` is a global (set in html.py's render context), not a macro argument —
     Jinja macros defined in the same template see the enclosing context. This macro is
@@ -74,7 +72,6 @@
   <p class="diagram-caption">{{ caption }}</p>
   {%- endif %}
 {%- endmacro -%}
-{%- if standalone -%}
 <!doctype html>
 <html lang="en">
 <head>
@@ -89,15 +86,6 @@
 </style>
 </head>
 <body>
-{%- else -%}
-<title>{{ page_title }}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600;700&display=swap">
-<style>
-{{ stylesheet }}
-</style>
-{%- endif %}
 
 <div class="shell">
   <nav class="sidebar" aria-label="Model contents">
@@ -786,9 +774,9 @@
 })();
 </script>
 {%- endif %}
-{%- if standalone %}
 {#- Chat needs a same-origin backend (POST /api/chat), which only `semdoc serve`
-    provides — so this is standalone-only, never in the Artifact fragment. -#}
+    provides — it degrades gracefully (see the fetch error handling below) when the
+    page is opened directly as a file instead. -#}
 <div id="chat-widget">
   <button type="button" id="chat-toggle" aria-expanded="false" aria-controls="chat-panel">
     Ask about this model
@@ -920,8 +908,5 @@
   });
 })();
 </script>
-{%- endif %}
-{%- if standalone %}
 </body>
 </html>
-{%- endif %}
