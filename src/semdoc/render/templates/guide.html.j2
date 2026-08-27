@@ -47,6 +47,12 @@
   {%- endif -%}
 {%- endmacro -%}
 
+{%- macro table_nav_link(table) -%}
+  <a href="#table-{{ table.name|slug }}" data-nav-item="{{ table.name|lower }}">
+    {{ table.name }}<span class="nav-count">{{ table.columns|selectattr("is_hidden", "false")|list|length }}</span>
+  </a>
+{%- endmacro -%}
+
 {%- macro ref_chips(refs) -%}
   {%- if refs -%}
     <div class="field-list">
@@ -137,10 +143,16 @@
 
     <div class="nav-group" data-nav-section="tables">
       <span class="nav-label">Tables</span>
-      {%- for table in visible_tables %}
-      <a href="#table-{{ table.name|slug }}" data-nav-item="{{ table.name|lower }}">
-        {{ table.name }}<span class="nav-count">{{ table.columns|selectattr("is_hidden", "false")|list|length }}</span>
-      </a>
+      {%- for table in pinned_tables %}
+      {{ table_nav_link(table) }}
+      {%- endfor %}
+      {%- for folder, group in table_groups %}
+      <details class="nav-folder" data-nav-folder>
+        <summary><span class="nav-folder-label">{{ folder }}</span><span class="nav-count">{{ group|length }}</span></summary>
+        {%- for table in group %}
+        {{ table_nav_link(table) }}
+        {%- endfor %}
+      </details>
       {%- endfor %}
       <p class="nav-empty hidden" data-nav-empty>No match.</p>
     </div>

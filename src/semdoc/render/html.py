@@ -21,7 +21,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 from markupsafe import Markup
 
 from semdoc import __version__
-from semdoc.ir.schema import Measure, ModelIR, TableKind
+from semdoc.ir.schema import Measure, ModelIR, Table, TableKind
 from semdoc.render import assets, diagrams
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -56,6 +56,31 @@ def _measure_groups(measures: list[Measure]) -> list[tuple[str, list[Measure]]]:
 
     ordered_keys = sorted(groups, key=lambda k: (k != "Ungrouped", k.casefold()))
     return [(key, groups[key]) for key in ordered_keys]
+
+
+def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
+    """Split tables into pinned (measure-hosting) and name-prefix groups, for the sidebar.
+
+    Tables have no `display_folder` the way measures do, but a naming convention like
+    "hmis Enrollment" / "hmis Exit" is common — this groups by the token before the first
+    space, falling back to "General" for a name with no such prefix (e.g. "AgeAsOfLookup").
+
+    A table that itself carries measures is pulled out and pinned above the groups
+    instead of being alphabetized into one: it is architecturally a different kind of
+    thing from a plain data table — typically a hidden container a modeler adds purely so
+    calculated measures have somewhere to live — and deserves its own top-level slot
+    regardless of what its name happens to start with.
+    """
+    pinned = [t for t in tables if t.measures]
+    rest = [t for t in tables if not t.measures]
+
+    groups: dict[str, list[Table]] = {}
+    for table in rest:
+        prefix = table.name.split(" ", 1)[0] if " " in table.name else ""
+        groups.setdefault(prefix or "General", []).append(table)
+
+    ordered_keys = sorted(groups, key=lambda k: (k != "General", k.casefold()))
+    return pinned, [(key, groups[key]) for key in ordered_keys]
 
 
 def _ordered_measures(ir: ModelIR) -> list[Measure]:
@@ -128,6 +153,8 @@ def _context(
     else:
         verification_state = "fail"
 
+    pinned_tables, table_groups = _table_groups(visible_tables)
+
     return {
         "model": model,
         "narrative": ir.narrative,
@@ -141,6 +168,8 @@ def _context(
         "subtitle": subtitle,
         "verification_state": verification_state,
         "visible_tables": visible_tables,
+        "pinned_tables": pinned_tables,
+        "table_groups": table_groups,
         "visible_measures": (visible_measures := [m for m in model.all_measures if not m.is_hidden]),
         "measure_groups": _measure_groups(visible_measures),
         "ordered_measures": _ordered_measures(ir),

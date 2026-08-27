@@ -20,7 +20,7 @@ from semdoc.ir.schema import (
     ValidationReport,
 )
 from semdoc.render import diagrams
-from semdoc.render.html import render_guide
+from semdoc.render.html import _table_groups, render_guide
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sample_tmsl.json"
 
@@ -204,6 +204,52 @@ def test_inactive_relationship_is_surfaced_in_both_variants(ir):
 def test_disconnected_table_is_called_out(ir):
     html = render_guide(ir, "business")
     assert "no relationships to anything else" in html
+
+
+def test_table_groups_pins_tables_that_host_their_own_measures():
+    from semdoc.ir.schema import Measure, Table
+
+    measures_home = Table(name="*HMIS_Measures", measures=[Measure(name="M1", expression="1")])
+    prefixed_a = Table(name="hmis Affiliation")
+    prefixed_b = Table(name="hmis Enrollment")
+    no_prefix = Table(name="AgeAsOfLookup")
+
+    pinned, groups = _table_groups([measures_home, prefixed_a, prefixed_b, no_prefix])
+
+    assert pinned == [measures_home]
+    assert dict(groups) == {
+        "General": [no_prefix],
+        "hmis": [prefixed_a, prefixed_b],
+    }
+
+
+def test_table_groups_orders_general_before_named_prefixes():
+    from semdoc.ir.schema import Table
+
+    tables = [Table(name="hmis Project"), Table(name="AgeAsOfLookup"), Table(name="hmis CoC")]
+    _, groups = _table_groups(tables)
+    assert [key for key, _ in groups] == ["General", "hmis"]
+
+
+def test_table_groups_empty_input():
+    pinned, groups = _table_groups([])
+    assert pinned == []
+    assert groups == []
+
+
+def test_sidebar_pins_measure_hosting_table_and_groups_the_rest_by_prefix(ir):
+    # Fixture tables: Service Fact carries its own measures -> pinned. Client, Program,
+    # Date, and Targets have no space in their names -> all fall into "General".
+    html = render_guide(ir, "technical")
+
+    pinned_link = '<a href="#table-service-fact" data-nav-item="service fact">'
+    general_summary = html.index('<span class="nav-folder-label">General</span>')
+
+    assert pinned_link in html
+    # The pinned link must appear before the General folder, and outside any <details>.
+    assert html.index(pinned_link) < general_summary
+    assert 'href="#table-client"' in html[general_summary:]
+    assert 'href="#table-targets"' in html[general_summary:]
 
 
 def test_sidebar_groups_measures_by_display_folder(ir):
