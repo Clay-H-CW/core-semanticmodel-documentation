@@ -388,10 +388,15 @@ section {
   color: var(--text-muted);
 }
 
+/* Deliberately distinct from the teal accent used everywhere else on the page: this is
+   the one marker readers need to spot at a glance while scanning, not just notice once
+   they've already read the sentence — dark green text on a green-tinted fill, with a
+   solid (not soft) border so it reads as an outline, not a same-color-family chip. */
 .provenance.generated {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--accent-soft);
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok);
+  font-weight: 600;
 }
 
 /* ---- verification banner ---------------------------------------------------------- */

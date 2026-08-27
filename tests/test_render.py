@@ -242,6 +242,18 @@ def test_verification_banner_reports_checks_when_validated(enriched_ir):
     assert "Identifiers checked" in html
 
 
+def test_generated_provenance_badge_uses_the_ok_color_not_the_accent():
+    # The badge needs to read as a distinct signal while scanning, not just another use
+    # of the page's teal accent — it should share styling with the green "ok" tokens
+    # used elsewhere (verification banner, date-table chip).
+    css_path = pathlib.Path(__file__).parent.parent / "src" / "semdoc" / "render" / "templates" / "style.css"
+    css = css_path.read_text(encoding="utf-8")
+    start = css.index(".provenance.generated")
+    generated_block = css[start : css.index("}", start)]
+    assert "var(--ok)" in generated_block
+    assert "var(--accent)" not in generated_block
+
+
 def test_narrative_is_marked_as_generated(enriched_ir):
     html = render_guide(enriched_ir, "business")
     assert "Tracks service delivery against funded programs." in html
