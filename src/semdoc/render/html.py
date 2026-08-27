@@ -18,14 +18,21 @@ import re
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from markupsafe import Markup
 
 from semdoc import __version__
 from semdoc.ir.schema import Measure, ModelIR, TableKind
-from semdoc.render import diagrams
+from semdoc.render import assets, diagrams
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 VARIANTS = ("technical", "business")
+
+# How the page gets a Mermaid renderer:
+#   "none"   - the host renders Mermaid itself (published Artifacts)
+#   "link"   - reference a sibling vendor/mermaid.min.js (local default; one shared copy)
+#   "inline" - embed the ~3.5 MB bundle for a genuinely single-file document
+MERMAID_MODES = ("none", "link", "inline")
 
 
 def _slug(value: str) -> str:
@@ -68,7 +75,13 @@ def _build_environment() -> Environment:
     return env
 
 
-def _context(ir: ModelIR, variant: str, standalone: bool) -> dict:
+def _context(
+    ir: ModelIR,
+    variant: str,
+    standalone: bool,
+    mermaid_mode: str,
+    mermaid_src_url: str,
+) -> dict:
     model = ir.model
 
     visible_tables = [t for t in model.tables if not t.is_hidden]
@@ -121,34 +134,81 @@ def _context(ir: ModelIR, variant: str, standalone: bool) -> dict:
         ),
         "warehouse_lineage": diagrams.warehouse_lineage(ir),
         "measure_dependencies": diagrams.measure_dependencies(model),
-        "stylesheet": (TEMPLATE_DIR / "style.css").read_text(encoding="utf-8"),
+        # Markup, not a plain str: autoescaping would turn `[data-theme="dark"]` into
+        # `[data-theme=&quot;dark&quot;]` — an invalid selector the browser silently drops,
+        # taking the dark theme and every quoted font-family with it. Both of these are
+        # our own files, never user data, so marking them safe is correct.
+        "stylesheet": Markup((TEMPLATE_DIR / "style.css").read_text(encoding="utf-8")),
         "tool_version": __version__,
         "generated_at": ir.generated_at,
+        "mermaid_mode": mermaid_mode,
+        "mermaid_src_url": mermaid_src_url,
+        # Only read the 3.5 MB bundle when it is actually going into the page.
+        "mermaid_source": Markup(assets.fetch_mermaid()) if mermaid_mode == "inline" else Markup(""),
     }
 
 
-def render_guide(ir: ModelIR, variant: str = "technical", standalone: bool = True) -> str:
+def render_guide(
+    ir: ModelIR,
+    variant: str = "technical",
+    standalone: bool = True,
+    *,
+    mermaid_mode: str | None = None,
+    mermaid_src_url: str = "vendor/mermaid.min.js",
+) -> str:
     if variant not in VARIANTS:
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
 
+    # A fragment is destined for an Artifact, which renders Mermaid natively; a standalone
+    # file has to bring its own.
+    if mermaid_mode is None:
+        mermaid_mode = "link" if standalone else "none"
+    if mermaid_mode not in MERMAID_MODES:
+        raise ValueError(f"mermaid_mode must be one of {MERMAID_MODES}, got {mermaid_mode!r}")
+
     env = _build_environment()
     template = env.get_template("guide.html.j2")
-    return template.render(**_context(ir, variant, standalone))
+    return template.render(
+        **_context(ir, variant, standalone, mermaid_mode, mermaid_src_url)
+    )
 
 
-def write_guides(ir: ModelIR, out_dir: Path) -> dict[str, Path]:
-    """Write both audience variants, standalone and fragment, into `out_dir`."""
+def write_guides(
+    ir: ModelIR,
+    out_dir: Path,
+    *,
+    inline_assets: bool = False,
+    with_diagrams: bool = True,
+) -> dict[str, Path]:
+    """Write both audience variants, standalone and fragment, into `out_dir`.
+
+    `with_diagrams` installs the Mermaid bundle so the standalone files render diagrams
+    when opened directly from disk. Set it False for an offline run with no cached bundle;
+    the pages then show diagram source as text instead of failing.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
 
+    mermaid_mode = "none"
+    if with_diagrams:
+        mermaid_mode = "inline" if inline_assets else "link"
+        if mermaid_mode == "link":
+            written["mermaid"] = assets.install_mermaid(out_dir)
+
     for variant in VARIANTS:
         standalone_path = out_dir / f"guide-{variant}.html"
-        standalone_path.write_text(render_guide(ir, variant, standalone=True), encoding="utf-8")
+        standalone_path.write_text(
+            render_guide(ir, variant, standalone=True, mermaid_mode=mermaid_mode),
+            encoding="utf-8",
+        )
         written[variant] = standalone_path
 
-        # Fragment form, ready to hand to the Artifact publisher.
+        # Fragment form, ready to hand to the Artifact publisher. Never ships Mermaid.
         fragment_path = out_dir / f"guide-{variant}.artifact.html"
-        fragment_path.write_text(render_guide(ir, variant, standalone=False), encoding="utf-8")
+        fragment_path.write_text(
+            render_guide(ir, variant, standalone=False, mermaid_mode="none"),
+            encoding="utf-8",
+        )
         written[f"{variant}-artifact"] = fragment_path
 
     return written

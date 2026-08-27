@@ -656,6 +656,60 @@ pre code {
   text-align: center;
 }
 
+/* Diagram typography lives here rather than in Mermaid's themeVariables — see the note in
+   the init script. Labels render as foreignObject HTML, so these rules also drive the
+   layout measurement, which is what keeps text from being clipped.
+   `!important` is required, not lazy: Mermaid injects its own stylesheet into the SVG
+   scoped by a generated id (`#mermaid-1787850794946 .nodeLabel`), and an id selector
+   cannot be out-specified by any selector we can write ahead of time. */
+.diagram svg .nodeLabel,
+.diagram svg .edgeLabel,
+.diagram svg .cluster-label {
+  font-family: var(--font-body) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+
+.diagram svg .nodeLabel small {
+  display: block;
+  font-size: 10.5px !important;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  opacity: 0.65;
+}
+
+.diagram svg .edgeLabel {
+  font-size: 11.5px !important;
+}
+
+/* Stated explicitly so a diagram survives Mermaid's stylesheet breaking: an edge path
+   without fill:none renders as a filled wedge instead of a line. */
+.diagram svg .flowchart-link,
+.diagram svg .edgePath .path {
+  fill: none;
+}
+
+/* Mermaid unavailable: show the source as readable code rather than a blank panel, and
+   say why so the reader is not left guessing. */
+.diagram-unrendered pre.mermaid {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: pre;
+}
+
+.diagram-unrendered::before {
+  content: "Diagram source — the renderer did not load";
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+  margin-bottom: 0.6rem;
+}
+
 .diagram-legend {
   display: flex;
   flex-wrap: wrap;

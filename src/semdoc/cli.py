@@ -26,6 +26,7 @@ from semdoc.config import load_env
 from semdoc.fabric import FabricClient, FabricError
 from semdoc.ir.build import tmsl_to_model
 from semdoc.ir.schema import ModelIR
+from semdoc.render.assets import AssetError
 from semdoc.render.html import write_guides
 
 DEFAULT_OUT = pathlib.Path("out")
@@ -127,9 +128,21 @@ def cmd_extract(args: argparse.Namespace) -> int:
 def cmd_render(args: argparse.Namespace) -> int:
     out_dir = pathlib.Path(args.out)
     ir = _load_ir(out_dir / IR_FILENAME if args.ir is None else pathlib.Path(args.ir))
-    written = write_guides(ir, out_dir)
+
+    try:
+        written = write_guides(
+            ir,
+            out_dir,
+            inline_assets=args.inline_assets,
+            with_diagrams=not args.no_diagrams,
+        )
+    except AssetError as exc:
+        print(f"{exc}\n\nRe-run with --no-diagrams to render without them.", file=sys.stderr)
+        return 3
+
     for label, path in written.items():
-        print(f"{label}\t{path}")
+        size = path.stat().st_size
+        print(f"{label}\t{path}\t{size:,} bytes")
     return 0
 
 
@@ -139,6 +152,56 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return rc
     args.ir = None
     return cmd_render(args)
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Serve the output directory over localhost.
+
+    Opening the files directly with file:// works too. A server is offered because some
+    browsers restrict local pages, and because a URL is easier to reload and to share with
+    someone sitting next to you than a file path.
+    """
+    import functools
+    import http.server
+    import threading
+    import webbrowser
+
+    out_dir = pathlib.Path(args.out).resolve()
+    if not out_dir.exists():
+        raise SystemExit(f"{out_dir} does not exist. Run `semdoc render` first.")
+
+    landing = f"guide-{args.variant}.html"
+    if not (out_dir / landing).exists():
+        available = sorted(p.name for p in out_dir.glob("guide-*.html"))
+        raise SystemExit(
+            f"{landing} not found in {out_dir}. "
+            f"Present: {', '.join(available) if available else 'nothing rendered yet'}"
+        )
+
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(out_dir))
+
+    # Bind to loopback only: this serves an unauthenticated directory that will contain
+    # real model metadata, and it has no business being reachable from the network.
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+    except OSError as exc:
+        raise SystemExit(f"Could not bind 127.0.0.1:{args.port}: {exc}")
+
+    url = f"http://127.0.0.1:{server.server_port}/{landing}"
+    print(f"Serving {out_dir}", file=sys.stderr)
+    print(f"  {url}", file=sys.stderr)
+    print("Press Ctrl+C to stop.", file=sys.stderr)
+
+    if not args.no_browser:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.", file=sys.stderr)
+    finally:
+        server.server_close()
+    return 0
 
 
 # -- wiring ----------------------------------------------------------------------------
@@ -180,17 +243,43 @@ def build_parser() -> argparse.ArgumentParser:
             help="Also write the raw model.bim, useful for building test fixtures.",
         )
 
+    def add_render_opts(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--inline-assets",
+            action="store_true",
+            help="Embed the Mermaid bundle in each guide for a single self-contained "
+            "file (~3.5 MB larger each). Default links a shared vendor/ copy.",
+        )
+        p.add_argument(
+            "--no-diagrams",
+            action="store_true",
+            help="Skip the Mermaid bundle. Guides then show diagram source as text.",
+        )
+
     p_extract = sub.add_parser("extract", help="Extract a model into model-ir.json.")
     add_target(p_extract)
     p_extract.set_defaults(func=cmd_extract)
 
     p_render = sub.add_parser("render", help="Render guides from a stored IR.")
     p_render.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    add_render_opts(p_render)
     p_render.set_defaults(func=cmd_render)
 
     p_generate = sub.add_parser("generate", help="Extract and render in one pass.")
     add_target(p_generate)
+    add_render_opts(p_generate)
     p_generate.set_defaults(func=cmd_generate)
+
+    p_serve = sub.add_parser("serve", help="Serve the rendered guides on localhost.")
+    p_serve.add_argument("--port", type=int, default=8000, help="Port (default: 8000).")
+    p_serve.add_argument(
+        "--variant",
+        choices=("technical", "business"),
+        default="technical",
+        help="Which guide to open (default: technical).",
+    )
+    p_serve.add_argument("--no-browser", action="store_true", help="Do not open a browser.")
+    p_serve.set_defaults(func=cmd_serve)
 
     return parser
 

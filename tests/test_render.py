@@ -115,6 +115,45 @@ def test_standalone_wraps_document_fragment_does_not(ir):
     assert "<title>Case Services Analytics</title>" in fragment
 
 
+@pytest.mark.parametrize("variant", ["technical", "business"])
+def test_inlined_css_is_not_html_escaped(ir, variant):
+    """Autoescaping the stylesheet silently destroys it.
+
+    `[data-theme="dark"]` escaped to `[data-theme=&quot;dark&quot;]` is an invalid
+    selector, so the browser drops the whole rule — the dark theme and every quoted
+    font-family vanish with no error anywhere. Caught only by looking at the page.
+    """
+    html = render_guide(ir, variant)
+
+    assert ':root[data-theme="dark"]' in html
+    assert ':root:not([data-theme="light"])' in html
+    assert '"IBM Plex Sans"' in html
+    assert "&quot;" not in html.split("</style>")[0]
+
+
+def test_inline_mermaid_source_is_not_escaped(ir, monkeypatch):
+    """Same hazard for the embedded bundle: escaping would corrupt the JavaScript."""
+    monkeypatch.setattr(
+        "semdoc.render.assets.fetch_mermaid",
+        lambda **_: 'var x = "quoted" && 1 < 2;',
+    )
+    html = render_guide(ir, "technical", mermaid_mode="inline")
+    assert 'var x = "quoted" && 1 < 2;' in html
+
+
+def test_fragment_omits_mermaid_engine(ir):
+    # Artifacts render Mermaid natively; shipping 3.5 MB of it would be waste.
+    fragment = render_guide(ir, "technical", standalone=False)
+    assert "vendor/mermaid.min.js" not in fragment
+    assert "mermaid.initialize" not in fragment
+
+
+def test_standalone_links_mermaid_engine(ir):
+    html = render_guide(ir, "technical", standalone=True)
+    assert 'src="vendor/mermaid.min.js"' in html
+    assert "mermaid.initialize" in html
+
+
 def test_technical_variant_includes_dax_and_security(ir):
     html = render_guide(ir, "technical")
     assert "DISTINCTCOUNT" in html
