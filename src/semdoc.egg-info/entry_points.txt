@@ -1,0 +1,2 @@
+[console_scripts]
+semdoc = semdoc.cli:main

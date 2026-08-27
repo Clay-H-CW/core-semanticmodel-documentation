@@ -1,0 +1,338 @@
+{
+  "name": "Case Services Analytics",
+  "compatibilityLevel": 1604,
+  "model": {
+    "culture": "en-US",
+    "description": "Service delivery and client enrollment reporting.",
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "tables": [
+      {
+        "name": "Service Fact",
+        "description": [
+          "One row per service event delivered to a client.",
+          "Grain: service event."
+        ],
+        "isHidden": false,
+        "columns": [
+          {
+            "name": "ServiceKey",
+            "dataType": "int64",
+            "sourceColumn": "service_key",
+            "isHidden": true,
+            "isKey": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "ClientKey",
+            "dataType": "int64",
+            "sourceColumn": "client_key",
+            "isHidden": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "ProgramKey",
+            "dataType": "int64",
+            "sourceColumn": "program_key",
+            "isHidden": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Service Date",
+            "dataType": "dateTime",
+            "sourceColumn": "service_date",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Enrollment Date",
+            "dataType": "dateTime",
+            "sourceColumn": "enrollment_date",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Units",
+            "description": "Billable units delivered.",
+            "dataType": "double",
+            "sourceColumn": "units",
+            "formatString": "#,0.00",
+            "summarizeBy": "sum"
+          }
+        ],
+        "measures": [
+          {
+            "name": "Service Count",
+            "description": "Number of service events.",
+            "expression": "COUNTROWS('Service Fact')",
+            "formatString": "#,0",
+            "displayFolder": "Volume"
+          },
+          {
+            "name": "Total Units",
+            "expression": "SUM('Service Fact'[Units])",
+            "formatString": "#,0.00",
+            "displayFolder": "Volume"
+          },
+          {
+            "name": "Avg Units per Service",
+            "expression": [
+              "DIVIDE ( [Total Units], [Service Count] ) -- guard against zero",
+              "// display in the Volume folder"
+            ],
+            "formatString": "#,0.00",
+            "displayFolder": "Volume"
+          },
+          {
+            "name": "Clients Served",
+            "expression": "DISTINCTCOUNT ( 'Service Fact'[ClientKey] )",
+            "formatString": "#,0"
+          },
+          {
+            "name": "Units YoY %",
+            "expression": "VAR Prior = CALCULATE ( [Total Units], SAMEPERIODLASTYEAR ( 'Date'[Date] ) )\nRETURN DIVIDE ( [Total Units] - Prior, Prior )",
+            "formatString": "0.0%",
+            "displayFolder": "Trend"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Service Fact",
+            "mode": "directLake",
+            "source": {
+              "type": "entity",
+              "entityName": "fact_service",
+              "schemaName": "dbo",
+              "expressionSource": "DatabaseQuery"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Client",
+        "isHidden": false,
+        "columns": [
+          {
+            "name": "ClientKey",
+            "dataType": "int64",
+            "sourceColumn": "client_key",
+            "isHidden": true,
+            "isKey": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Client Name",
+            "dataType": "string",
+            "sourceColumn": "client_name",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "County",
+            "description": "County of residence at intake.",
+            "dataType": "string",
+            "sourceColumn": "county",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Age Band",
+            "dataType": "string",
+            "sourceColumn": "age_band",
+            "sortByColumn": "Age Band Sort",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Age Band Sort",
+            "dataType": "int64",
+            "sourceColumn": "age_band_sort",
+            "isHidden": true,
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Client",
+            "mode": "directLake",
+            "source": {
+              "type": "entity",
+              "entityName": "dim_client",
+              "schemaName": "dbo",
+              "expressionSource": "DatabaseQuery"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Program",
+        "description": "Funded programs under which services are delivered.",
+        "columns": [
+          {
+            "name": "ProgramKey",
+            "dataType": "int64",
+            "sourceColumn": "program_key",
+            "isHidden": true,
+            "isKey": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Program Name",
+            "dataType": "string",
+            "sourceColumn": "program_name",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Funding Source",
+            "dataType": "string",
+            "sourceColumn": "funding_source",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Program",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Sql.Database(\"abc.datawarehouse.fabric.microsoft.com\", \"CaseWH\"),",
+                "    Nav = Source{[Schema=\"dbo\",Item=\"dim_program\"]}[Data]",
+                "in",
+                "    Nav"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "Date",
+        "description": "Marked date table. Required for time intelligence.",
+        "dataCategory": "Time",
+        "columns": [
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "sourceColumn": "date",
+            "isKey": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Year",
+            "dataType": "int64",
+            "sourceColumn": "year",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Month Name",
+            "dataType": "string",
+            "sourceColumn": "month_name",
+            "sortByColumn": "Month Number",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Month Number",
+            "dataType": "int64",
+            "sourceColumn": "month_number",
+            "isHidden": true,
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Fiscal Year",
+            "dataType": "string",
+            "sourceColumn": "fiscal_year",
+            "summarizeBy": "none"
+          }
+        ],
+        "hierarchies": [
+          {
+            "name": "Calendar",
+            "levels": [
+              { "name": "Year", "ordinal": 0, "column": "Year" },
+              { "name": "Month", "ordinal": 1, "column": "Month Name" }
+            ]
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Date",
+            "mode": "directLake",
+            "source": {
+              "type": "entity",
+              "entityName": "dim_date",
+              "schemaName": "dbo",
+              "expressionSource": "DatabaseQuery"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Targets",
+        "description": "Standalone targets, not related to anything.",
+        "columns": [
+          {
+            "name": "Metric",
+            "dataType": "string",
+            "sourceColumn": "metric",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Target Value",
+            "dataType": "double",
+            "sourceColumn": "target_value",
+            "summarizeBy": "sum"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Targets",
+            "mode": "import",
+            "source": {
+              "type": "calculated",
+              "expression": "DATATABLE ( \"Metric\", STRING, \"Target Value\", DOUBLE, { { \"Units\", 1000.0 } } )"
+            }
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "b1f0c9e2-service-client",
+        "fromTable": "Service Fact",
+        "fromColumn": "ClientKey",
+        "toTable": "Client",
+        "toColumn": "ClientKey"
+      },
+      {
+        "name": "c2a1d8f3-service-program",
+        "fromTable": "Service Fact",
+        "fromColumn": "ProgramKey",
+        "toTable": "Program",
+        "toColumn": "ProgramKey"
+      },
+      {
+        "name": "d3b2e9a4-service-date",
+        "fromTable": "Service Fact",
+        "fromColumn": "Service Date",
+        "toTable": "Date",
+        "toColumn": "Date"
+      },
+      {
+        "name": "e4c3f0b5-enrollment-date",
+        "fromTable": "Service Fact",
+        "fromColumn": "Enrollment Date",
+        "toTable": "Date",
+        "toColumn": "Date",
+        "isActive": false
+      }
+    ],
+    "roles": [
+      {
+        "name": "County Staff",
+        "description": "Restricts visibility to the user's assigned county.",
+        "modelPermission": "read",
+        "tablePermissions": [
+          {
+            "name": "Client",
+            "filterExpression": "'Client'[County] = LOOKUPVALUE ( 'User County'[County], 'User County'[UPN], USERPRINCIPALNAME () )"
+          }
+        ]
+      }
+    ]
+  }
+}
