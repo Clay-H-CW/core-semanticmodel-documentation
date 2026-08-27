@@ -154,6 +154,23 @@ def test_standalone_links_mermaid_engine(ir):
     assert "mermaid.initialize" in html
 
 
+def test_fragment_omits_chat_widget(ir):
+    # The widget calls a same-origin /api/chat that only `semdoc serve` provides. An
+    # Artifact host has no such backend, so shipping the widget there would be dead UI.
+    # (The stylesheet's #chat-widget CSS rule is inlined either way — harmless, since
+    # the element it targets is never emitted — so this checks markup, not the ruleset.)
+    fragment = render_guide(ir, "technical", standalone=False)
+    assert 'id="chat-widget"' not in fragment
+    assert "/api/chat" not in fragment
+
+
+def test_standalone_includes_chat_widget(ir):
+    html = render_guide(ir, "technical", standalone=True)
+    assert 'id="chat-widget"' in html
+    assert "/api/chat" in html
+    assert "Ask about Case Services Analytics" in html
+
+
 def test_technical_variant_includes_dax_and_security(ir):
     html = render_guide(ir, "technical")
     assert "DISTINCTCOUNT" in html

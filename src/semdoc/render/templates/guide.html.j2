@@ -738,6 +738,141 @@
 </script>
 {%- endif %}
 {%- if standalone %}
+{#- Chat needs a same-origin backend (POST /api/chat), which only `semdoc serve`
+    provides — so this is standalone-only, never in the Artifact fragment. -#}
+<div id="chat-widget">
+  <button type="button" id="chat-toggle" aria-expanded="false" aria-controls="chat-panel">
+    Ask about this model
+  </button>
+  <div id="chat-panel" class="hidden" role="dialog" aria-label="Ask about {{ model.name }}">
+    <div class="chat-header">
+      <span class="chat-title">Ask about {{ model.name }}</span>
+      <button type="button" id="chat-close" aria-label="Close">&times;</button>
+    </div>
+    <div id="chat-messages" class="chat-messages">
+      <p class="chat-hint">
+        Ask how to build something with this model — a field to use, a DAX pattern, why a
+        relationship isn't filtering. Answers are grounded in the model definition; the
+        assistant looks up exact tables and measures rather than guessing.
+      </p>
+    </div>
+    <div id="chat-error" class="chat-error hidden"></div>
+    <form id="chat-form" class="chat-form">
+      <label class="hidden" for="chat-input">Your question</label>
+      <textarea id="chat-input" rows="2" placeholder="e.g. How do I show active enrollments by program?"></textarea>
+      <button type="submit" id="chat-send">Send</button>
+    </form>
+  </div>
+</div>
+<script>
+(function () {
+  var toggle = document.getElementById("chat-toggle");
+  var panel = document.getElementById("chat-panel");
+  var closeBtn = document.getElementById("chat-close");
+  var messagesEl = document.getElementById("chat-messages");
+  var errorEl = document.getElementById("chat-error");
+  var form = document.getElementById("chat-form");
+  var input = document.getElementById("chat-input");
+  var sendBtn = document.getElementById("chat-send");
+  if (!toggle || !form) return;
+
+  var history = [];
+
+  function setOpen(open) {
+    panel.classList.toggle("hidden", !open);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) input.focus();
+  }
+
+  toggle.addEventListener("click", function () { setOpen(panel.classList.contains("hidden")); });
+  closeBtn.addEventListener("click", function () { setOpen(false); });
+
+  // Renders fenced ```code``` blocks as <pre><code>; everything else is plain escaped
+  // text with newlines preserved via CSS white-space. No innerHTML with model-derived
+  // or model-generated text — every text node is set via textContent.
+  function renderMessage(container, text) {
+    var parts = text.split(/```(?:\w*\n)?/);
+    parts.forEach(function (part, i) {
+      if (!part) return;
+      if (i % 2 === 1) {
+        var pre = document.createElement("pre");
+        var code = document.createElement("code");
+        code.textContent = part.replace(/\n$/, "");
+        pre.appendChild(code);
+        container.appendChild(pre);
+      } else {
+        var p = document.createElement("p");
+        p.textContent = part;
+        container.appendChild(p);
+      }
+    });
+  }
+
+  function addBubble(role, text) {
+    var bubble = document.createElement("div");
+    bubble.className = "chat-bubble " + role;
+    renderMessage(bubble, text);
+    messagesEl.appendChild(bubble);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return bubble;
+  }
+
+  function setBusy(busy) {
+    input.disabled = busy;
+    sendBtn.disabled = busy;
+    sendBtn.textContent = busy ? "Thinking…" : "Send";
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.classList.remove("hidden");
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+
+    errorEl.classList.add("hidden");
+    addBubble("user", text);
+    history.push({ role: "user", content: text });
+    input.value = "";
+    setBusy(true);
+
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ history: history })
+    })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          if (!response.ok) throw new Error(data.error || "Request failed.");
+          return data;
+        });
+      })
+      .then(function (data) {
+        addBubble("assistant", data.reply);
+        history.push({ role: "assistant", content: data.reply });
+      })
+      .catch(function (err) {
+        // A page opened via file:// has no server behind it, so fetch itself fails
+        // (not an HTTP error) — that specific case gets its own actionable message.
+        if (err instanceof TypeError) {
+          showError(
+            "Chat needs a local server. Run `semdoc serve` and open this page at " +
+            "its http://127.0.0.1 address instead of the file directly."
+          );
+        } else {
+          showError(err.message);
+        }
+        history.pop();
+      })
+      .then(function () { setBusy(false); });
+  });
+})();
+</script>
+{%- endif %}
+{%- if standalone %}
 </body>
 </html>
 {%- endif %}

@@ -5,6 +5,9 @@
     semdoc extract --workspace W --model M   pull the model into out/model-ir.json
     semdoc render                         render guides from a stored IR
     semdoc generate --workspace W --model M  extract and render in one pass
+    semdoc narrative apply FILE           validate narrative JSON against the model, attach it
+    semdoc serve                          serve guides locally, with the chat widget if
+                                           ANTHROPIC_API_KEY is set
 
 `extract` and `render` are separate on purpose: extraction needs Fabric access, while
 rendering needs only the stored IR. That split makes it possible to iterate on templates
@@ -22,12 +25,13 @@ import sys
 
 from semdoc import __version__
 from semdoc.auth import credential_from_env
-from semdoc.config import load_env
+from semdoc.config import enrich_model, load_env
 from semdoc.fabric import FabricClient, FabricError
 from semdoc.ir.build import tmsl_to_model
-from semdoc.ir.schema import ModelIR
+from semdoc.ir.schema import ModelIR, Narrative
 from semdoc.render.assets import AssetError
 from semdoc.render.html import write_guides
+from semdoc.validate import validate_identifiers
 
 DEFAULT_OUT = pathlib.Path("out")
 IR_FILENAME = "model-ir.json"
@@ -46,9 +50,8 @@ def _resolve(args: argparse.Namespace, key: str, env_var: str) -> str:
     return value
 
 
-def _write_ir(ir: ModelIR, out_dir: pathlib.Path) -> pathlib.Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / IR_FILENAME
+def _write_ir(ir: ModelIR, path: pathlib.Path) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(ir.model_dump(mode="json"), indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -115,7 +118,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     )
     ir = ModelIR(model=model, generated_at=_now(), source_tool_version=__version__)
 
-    path = _write_ir(ir, out_dir)
+    path = _write_ir(ir, out_dir / IR_FILENAME)
     print(
         f"  {len(model.tables)} tables, {len(model.all_measures)} measures, "
         f"{len(model.relationships)} relationships, {len(model.roles)} RLS roles",
@@ -146,6 +149,43 @@ def cmd_render(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_narrative_apply(args: argparse.Namespace) -> int:
+    """Attach narrative content to the stored IR, after checking it against the model.
+
+    The narrative file is plain JSON matching the `Narrative` schema — hand-authored,
+    written by a session working from the IR directly (no API call), or eventually the
+    output of an automated `semdoc enrich` pass. All three go through the same check
+    here, because all three can misname a field.
+    """
+    out_dir = pathlib.Path(args.out)
+    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    ir = _load_ir(ir_path)
+
+    narrative_path = pathlib.Path(args.narrative_path)
+    if not narrative_path.exists():
+        raise SystemExit(f"{narrative_path} does not exist.")
+    narrative = Narrative.model_validate_json(narrative_path.read_text(encoding="utf-8"))
+
+    report = validate_identifiers(ir.model, narrative)
+    print(f"Checked {report.identifiers_checked} identifiers.", file=sys.stderr)
+    if not report.ok:
+        for failure in report.identifiers_failed:
+            print(f"  FAIL: {failure}", file=sys.stderr)
+        if not args.force:
+            print(
+                f"\n{len(report.identifiers_failed)} identifier(s) do not resolve against "
+                f"the model. Fix the narrative file, or pass --force to attach it anyway.",
+                file=sys.stderr,
+            )
+            return 1
+
+    ir.narrative = narrative
+    ir.validation = report
+    _write_ir(ir, ir_path)
+    print(f"Narrative attached ({'PASS' if report.ok else 'FORCED with failures'}) -> {ir_path}")
+    return 0
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
     rc = cmd_extract(args)
     if rc != 0:
@@ -158,13 +198,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
     """Serve the output directory over localhost.
 
     Opening the files directly with file:// works too. A server is offered because some
-    browsers restrict local pages, and because a URL is easier to reload and to share with
-    someone sitting next to you than a file path.
+    browsers restrict local pages, because a URL is easier to reload and to share with
+    someone sitting next to you than a file path, and because the chat widget needs a
+    same-origin endpoint (/api/chat) to call — that only exists here, not over file://.
     """
-    import functools
     import http.server
     import threading
     import webbrowser
+
+    import anthropic
+
+    from semdoc import chat as chat_module
 
     out_dir = pathlib.Path(args.out).resolve()
     if not out_dir.exists():
@@ -178,18 +222,81 @@ def cmd_serve(args: argparse.Namespace) -> int:
             f"Present: {', '.join(available) if available else 'nothing rendered yet'}"
         )
 
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(out_dir))
+    # Loaded once at startup, not per request: re-run `semdoc extract` and restart the
+    # server to pick up a changed model. Missing is not fatal — the guide still browses
+    # fine without chat.
+    ir_path = out_dir / IR_FILENAME
+    ir = _load_ir(ir_path) if ir_path.exists() else None
+
+    # `Anthropic()` with no api_key resolves ANTHROPIC_API_KEY from the environment
+    # (already loaded from .env by main()). Left unset when there is no key so chat
+    # requests fail with a clear message instead of the SDK raising at request time.
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    anthropic_client = anthropic.Anthropic() if api_key else None
+
+    def send_json(handler: http.server.BaseHTTPRequestHandler, status: int, payload: dict) -> None:
+        data = json.dumps(payload).encode("utf-8")
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(out_dir), **kw)
+
+        def do_POST(self) -> None:  # noqa: N802 - required name by http.server
+            if self.path != "/api/chat":
+                self.send_error(404)
+                return
+
+            if ir is None:
+                send_json(self, 503, {"error": "No model extracted yet. Run `semdoc extract` first."})
+                return
+            if anthropic_client is None:
+                send_json(
+                    self,
+                    503,
+                    {"error": "ANTHROPIC_API_KEY is not set. Add it to .env and restart `semdoc serve`."},
+                )
+                return
+
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                history = body.get("history")
+                if not isinstance(history, list) or not history:
+                    raise ValueError("history must be a non-empty list")
+            except (ValueError, json.JSONDecodeError) as exc:
+                send_json(self, 400, {"error": f"Bad request: {exc}"})
+                return
+
+            try:
+                reply = chat_module.answer(ir, anthropic_client, history)
+            except chat_module.ChatError as exc:
+                send_json(self, 502, {"error": str(exc)})
+                return
+            except Exception as exc:  # last-resort guard: a bad turn must not kill the server
+                send_json(self, 500, {"error": f"Unexpected error: {exc}"})
+                return
+
+            send_json(self, 200, {"reply": reply})
 
     # Bind to loopback only: this serves an unauthenticated directory that will contain
     # real model metadata, and it has no business being reachable from the network.
     try:
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as exc:
         raise SystemExit(f"Could not bind 127.0.0.1:{args.port}: {exc}")
 
     url = f"http://127.0.0.1:{server.server_port}/{landing}"
     print(f"Serving {out_dir}", file=sys.stderr)
     print(f"  {url}", file=sys.stderr)
+    if anthropic_client is None:
+        print("  Chat disabled — set ANTHROPIC_API_KEY in .env to enable it.", file=sys.stderr)
+    else:
+        print(f"  Chat enabled (model: {enrich_model()})", file=sys.stderr)
     print("Press Ctrl+C to stop.", file=sys.stderr)
 
     if not args.no_browser:
@@ -264,6 +371,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
     add_render_opts(p_render)
     p_render.set_defaults(func=cmd_render)
+
+    p_narrative = sub.add_parser(
+        "narrative", help="Attach narrative content to a stored IR."
+    )
+    narrative_sub = p_narrative.add_subparsers(dest="narrative_command", required=True)
+    p_narrative_apply = narrative_sub.add_parser(
+        "apply", help="Validate a narrative JSON file against the model and attach it."
+    )
+    p_narrative_apply.add_argument("narrative_path", help="Path to a Narrative-schema JSON file.")
+    p_narrative_apply.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_narrative_apply.add_argument(
+        "--force",
+        action="store_true",
+        help="Attach the narrative even if some identifiers fail to resolve.",
+    )
+    p_narrative_apply.set_defaults(func=cmd_narrative_apply)
 
     p_generate = sub.add_parser("generate", help="Extract and render in one pass.")
     add_target(p_generate)
