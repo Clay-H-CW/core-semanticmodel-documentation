@@ -206,6 +206,23 @@ def test_disconnected_table_is_called_out(ir):
     assert "no relationships to anything else" in html
 
 
+def test_sidebar_groups_measures_by_display_folder(ir):
+    # Fixture measures: Service Count/Total Units/Avg Units per Service -> "Volume",
+    # Units YoY % -> "Trend", Clients Served -> no folder -> "Ungrouped".
+    html = render_guide(ir, "technical")
+    assert '<span class="nav-folder-label">Ungrouped</span>' in html
+    assert '<span class="nav-folder-label">Volume</span>' in html
+    assert '<span class="nav-folder-label">Trend</span>' in html
+    # Ungrouped sorts first, then alphabetically among real folder names.
+    assert html.index("Ungrouped</span>") < html.index("Trend</span>") < html.index("Volume</span>")
+
+
+def test_sidebar_folder_group_has_a_correct_count(ir):
+    html = render_guide(ir, "technical")
+    volume_summary = html[html.index('nav-folder-label">Volume') : html.index("</summary>", html.index('nav-folder-label">Volume'))]
+    assert '<span class="nav-count">3</span>' in volume_summary
+
+
 def test_base_measures_render_before_derived_ones(ir):
     html = render_guide(ir, "technical")
     assert html.index('id="measure-total-units"') < html.index(

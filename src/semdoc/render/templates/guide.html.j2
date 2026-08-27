@@ -110,8 +110,13 @@
 
     <div class="nav-group" data-nav-section="measures">
       <span class="nav-label">Measures</span>
-      {%- for measure in visible_measures %}
-      <a href="#measure-{{ measure.name|slug }}" data-nav-item="{{ measure.name|lower }}">{{ measure.name }}</a>
+      {%- for folder, group in measure_groups %}
+      <details class="nav-folder" data-nav-folder>
+        <summary><span class="nav-folder-label">{{ folder }}</span><span class="nav-count">{{ group|length }}</span></summary>
+        {%- for measure in group %}
+        <a href="#measure-{{ measure.name|slug }}" data-nav-item="{{ measure.name|lower }}">{{ measure.name }}</a>
+        {%- endfor %}
+      </details>
       {%- endfor %}
       {%- if not visible_measures %}
       <span class="nav-empty">No visible measures.</span>
@@ -610,6 +615,7 @@
   var navItems = Array.prototype.slice.call(document.querySelectorAll("[data-nav-item]"));
   var cards = Array.prototype.slice.call(document.querySelectorAll("[data-search-item]"));
   var emptyNotes = Array.prototype.slice.call(document.querySelectorAll("[data-nav-empty]"));
+  var navFolders = Array.prototype.slice.call(document.querySelectorAll("[data-nav-folder]"));
 
   function apply() {
     var q = input.value.trim().toLowerCase();
@@ -619,6 +625,17 @@
     });
     cards.forEach(function (el) {
       el.classList.toggle("hidden", q !== "" && el.dataset.searchItem.indexOf(q) === -1);
+    });
+
+    // Folders default closed to keep the sidebar short; a search that matches something
+    // inside pops it open, and clearing the search puts it back to closed rather than
+    // leaving every folder that was ever opened stuck expanded.
+    navFolders.forEach(function (details) {
+      var hasMatch = Array.prototype.some.call(
+        details.querySelectorAll("[data-nav-item]"),
+        function (el) { return !el.classList.contains("hidden"); }
+      );
+      details.open = q !== "" && hasMatch;
     });
 
     emptyNotes.forEach(function (note) {

@@ -39,6 +39,25 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(value).casefold()).strip("-") or "x"
 
 
+def _measure_groups(measures: list[Measure]) -> list[tuple[str, list[Measure]]]:
+    """Group measures by their Power BI display folder, for the sidebar nav.
+
+    Reuses structure the model author already built rather than inventing a new one — a
+    field list with a real display folder is exactly the "how do I stop scrolling through
+    199 measures" problem the folder already solves in Power BI Desktop. Order within a
+    group is preserved from the model (an author's own field-list ordering), and a nested
+    folder path (`Basic\\Detail`) is rendered with the same "›" separator used elsewhere
+    for hierarchy levels.
+    """
+    groups: dict[str, list[Measure]] = {}
+    for measure in measures:
+        key = measure.display_folder.replace("\\", " › ").strip() if measure.display_folder else ""
+        groups.setdefault(key or "Ungrouped", []).append(measure)
+
+    ordered_keys = sorted(groups, key=lambda k: (k != "Ungrouped", k.casefold()))
+    return [(key, groups[key]) for key in ordered_keys]
+
+
 def _ordered_measures(ir: ModelIR) -> list[Measure]:
     """Base measures first, then measures that build on them.
 
@@ -122,7 +141,8 @@ def _context(
         "subtitle": subtitle,
         "verification_state": verification_state,
         "visible_tables": visible_tables,
-        "visible_measures": [m for m in model.all_measures if not m.is_hidden],
+        "visible_measures": (visible_measures := [m for m in model.all_measures if not m.is_hidden]),
+        "measure_groups": _measure_groups(visible_measures),
         "ordered_measures": _ordered_measures(ir),
         "date_table": next((t for t in model.tables if t.is_date_table), None),
         "has_dax_snippets": bool(

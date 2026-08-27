@@ -241,6 +241,62 @@ body {
   font-style: italic;
 }
 
+/* Display-folder groups in the sidebar — closed by default so 199 measures reads as ~12
+   folder rows, not a scroll. Native <details>/<summary>: no JS needed to open/close. */
+.nav-folder summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.4rem;
+  margin-left: -0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.nav-folder summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-folder summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  color: var(--text-faint);
+  transition: transform 0.12s ease;
+}
+
+.nav-folder[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.nav-folder summary:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.nav-folder-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-folder summary .nav-count {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.nav-folder a {
+  padding-left: 1.15rem;
+}
+
 /* ---- headings --------------------------------------------------------------------- */
 
 .page-title {
