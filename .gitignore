@@ -34,3 +34,7 @@ obj/
 
 # Logs
 *.log
+
+# semdoc
+out/
+.semdoc/

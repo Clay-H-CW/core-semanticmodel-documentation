@@ -1,0 +1,29 @@
+[project]
+name = "semdoc"
+version = "0.1.0"
+description = "Generate documentation, diagrams, and user guides for Fabric semantic models"
+requires-python = ">=3.11"
+dependencies = [
+    "msal>=1.31",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "jinja2>=3.1",
+    "anthropic>=0.40",
+]
+
+[project.optional-dependencies]
+warehouse = ["pyodbc>=5.2"]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+semdoc = "semdoc.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
