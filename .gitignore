@@ -38,3 +38,4 @@ obj/
 # semdoc
 out/
 .semdoc/
+*.egg-info/
