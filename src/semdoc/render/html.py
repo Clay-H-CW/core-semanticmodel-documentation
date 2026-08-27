@@ -1,0 +1,154 @@
+"""Render a `ModelIR` to the HTML guide.
+
+Two audience variants come out of one template (see D-audience in docs/design.md):
+
+- `technical` — full column inventory with data types, verbatim DAX, RLS filter
+  expressions, warehouse lineage, relationship table.
+- `business`  — what the model answers and how to build it; hidden columns, key columns,
+  and DAX bodies are left out.
+
+`standalone=True` emits a complete HTML document for opening as a local file.
+`standalone=False` emits a body fragment for publishing as an Artifact, where the host
+supplies the document skeleton and renders the Mermaid blocks natively.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+
+from semdoc import __version__
+from semdoc.ir.schema import Measure, ModelIR, TableKind
+from semdoc.render import diagrams
+
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+VARIANTS = ("technical", "business")
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value).casefold()).strip("-") or "x"
+
+
+def _ordered_measures(ir: ModelIR) -> list[Measure]:
+    """Base measures first, then measures that build on them.
+
+    A reader meeting a model for the first time needs `Total Units` before
+    `Avg Units per Service`; presenting them alphabetically buries the foundations.
+    """
+    measures = [m for m in ir.model.all_measures if not m.is_hidden]
+
+    def depth(measure: Measure, seen: frozenset[str] = frozenset()) -> int:
+        if measure.name in seen:
+            return 0  # circular reference; the model would not deploy, but do not hang
+        parents = [d.measure for d in measure.depends_on if d.measure]
+        if not parents:
+            return 0
+        child_depths = []
+        for name in parents:
+            child = ir.model.measure(name)
+            if child is not None:
+                child_depths.append(depth(child, seen | {measure.name}))
+        return 1 + max(child_depths, default=0)
+
+    return sorted(measures, key=lambda m: (depth(m), m.display_folder or "", m.name))
+
+
+def _build_environment() -> Environment:
+    env = Environment(
+        loader=FileSystemLoader(TEMPLATE_DIR),
+        autoescape=select_autoescape(["html", "j2"]),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=False,
+    )
+    env.filters["slug"] = _slug
+    return env
+
+
+def _context(ir: ModelIR, variant: str, standalone: bool) -> dict:
+    model = ir.model
+
+    visible_tables = [t for t in model.tables if not t.is_hidden]
+    if variant == "business":
+        # A calculation group is a modelling construct, not something to slice by.
+        visible_tables = [t for t in visible_tables if t.kind is not TableKind.CALCULATION_GROUP]
+
+    heading = (
+        f"Building reports on {model.name}"
+        if variant == "business"
+        else f"{model.name} reference"
+    )
+    subtitle = (
+        "What this model can answer, which fields to use, and how to avoid the "
+        "traps that produce wrong numbers."
+        if variant == "business"
+        else "Complete structure, calculation definitions, security rules, and the "
+        "warehouse objects behind each table."
+    )
+
+    if ir.validation is None:
+        verification_state = "absent"
+    elif ir.validation.ok:
+        verification_state = "pass"
+    else:
+        verification_state = "fail"
+
+    return {
+        "model": model,
+        "narrative": ir.narrative,
+        "validation": ir.validation,
+        "variant": variant,
+        "standalone": standalone,
+        # The model's own name is distinctive and identifies the page in a gallery;
+        # appending "Model Guide" would only add a generic explainer.
+        "page_title": model.name,
+        "heading": heading,
+        "subtitle": subtitle,
+        "verification_state": verification_state,
+        "visible_tables": visible_tables,
+        "visible_measures": [m for m in model.all_measures if not m.is_hidden],
+        "ordered_measures": _ordered_measures(ir),
+        "date_table": next((t for t in model.tables if t.is_date_table), None),
+        "disconnected_tables": [
+            t for t in visible_tables if t.kind is TableKind.DISCONNECTED
+        ],
+        "inactive_relationships": [r for r in model.relationships if not r.is_active],
+        "star_schema": diagrams.star_schema(
+            model, label_hidden_columns=(variant == "technical")
+        ),
+        "warehouse_lineage": diagrams.warehouse_lineage(ir),
+        "measure_dependencies": diagrams.measure_dependencies(model),
+        "stylesheet": (TEMPLATE_DIR / "style.css").read_text(encoding="utf-8"),
+        "tool_version": __version__,
+        "generated_at": ir.generated_at,
+    }
+
+
+def render_guide(ir: ModelIR, variant: str = "technical", standalone: bool = True) -> str:
+    if variant not in VARIANTS:
+        raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
+
+    env = _build_environment()
+    template = env.get_template("guide.html.j2")
+    return template.render(**_context(ir, variant, standalone))
+
+
+def write_guides(ir: ModelIR, out_dir: Path) -> dict[str, Path]:
+    """Write both audience variants, standalone and fragment, into `out_dir`."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, Path] = {}
+
+    for variant in VARIANTS:
+        standalone_path = out_dir / f"guide-{variant}.html"
+        standalone_path.write_text(render_guide(ir, variant, standalone=True), encoding="utf-8")
+        written[variant] = standalone_path
+
+        # Fragment form, ready to hand to the Artifact publisher.
+        fragment_path = out_dir / f"guide-{variant}.artifact.html"
+        fragment_path.write_text(render_guide(ir, variant, standalone=False), encoding="utf-8")
+        written[f"{variant}-artifact"] = fragment_path
+
+    return written

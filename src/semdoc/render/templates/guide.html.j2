@@ -1,0 +1,633 @@
+{#-
+  The semantic model guide.
+
+  One template serves both audiences via `variant`:
+    - "technical": full column inventory with data types, verbatim DAX, RLS expressions,
+      warehouse lineage, and the measure dependency graph.
+    - "business":  what the model answers and how to build it, with implementation
+      detail and internal keys omitted.
+
+  `standalone` controls whether a full HTML document is emitted (for opening as a local
+  file) or a body fragment (for publishing as an Artifact, where the host supplies the
+  document skeleton).
+-#}
+{%- macro provenance(kind) -%}
+  {%- if kind == "model" -%}
+    <span class="provenance from-model" title="Read directly from the semantic model">from model</span>
+  {%- else -%}
+    <span class="provenance generated" title="Written by an LLM, then checked against the model">generated &amp; verified</span>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro kind_chip(table) -%}
+  {%- if table.is_date_table -%}
+    <span class="chip date-table">date table</span>
+  {%- endif -%}
+  {%- if table.kind.value == "fact" -%}
+    <span class="chip fact">fact</span>
+  {%- elif table.kind.value == "dimension" -%}
+    <span class="chip dimension">dimension</span>
+  {%- elif table.kind.value == "bridge" -%}
+    <span class="chip bridge">bridge</span>
+  {%- elif table.kind.value == "calculation_group" -%}
+    <span class="chip calc-group">calculation group</span>
+  {%- elif table.kind.value == "disconnected" -%}
+    <span class="chip disconnected">disconnected</span>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro ref_chips(refs) -%}
+  {%- if refs -%}
+    <div class="field-list">
+      {%- for ref in refs -%}
+        <span class="chip">{{ ref }}</span>
+      {%- endfor -%}
+    </div>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro diagram(source, caption, legend) -%}
+  <div class="diagram">
+    <pre class="mermaid">{{ source }}</pre>
+    {%- if legend %}
+    <div class="diagram-legend">{{ legend|safe }}</div>
+    {%- endif %}
+  </div>
+  {%- if caption %}
+  <p class="diagram-caption">{{ caption }}</p>
+  {%- endif %}
+{%- endmacro -%}
+{%- if standalone -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page_title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600;700&display=swap">
+<style>
+{{ stylesheet }}
+</style>
+</head>
+<body>
+{%- else -%}
+<title>{{ page_title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600;700&display=swap">
+<style>
+{{ stylesheet }}
+</style>
+{%- endif %}
+
+<div class="shell">
+  <nav class="sidebar" aria-label="Model contents">
+    <div class="sidebar-brand">
+      <span class="model-name">{{ model.name }}</span>
+      {%- if model.workspace %}
+      <span class="workspace">{{ model.workspace }}</span>
+      {%- endif %}
+    </div>
+
+    <div class="filter-field">
+      <label class="hidden" for="nav-filter">Filter tables and measures</label>
+      <input id="nav-filter" type="search" placeholder="Filter tables &amp; measures…" autocomplete="off">
+    </div>
+
+    <div class="nav-group">
+      <span class="nav-label">Start here</span>
+      <a href="#overview">Overview</a>
+      {%- if narrative and narrative.questions_answered %}
+      <a href="#questions">What you can answer<span class="nav-count">{{ narrative.questions_answered|length }}</span></a>
+      {%- endif %}
+      <a href="#data-model">Data model</a>
+      {%- if narrative and narrative.gotchas %}
+      <a href="#gotchas">Watch out for<span class="nav-count">{{ narrative.gotchas|length }}</span></a>
+      {%- endif %}
+    </div>
+
+    <div class="nav-group" data-nav-section="measures">
+      <span class="nav-label">Measures</span>
+      {%- for measure in visible_measures %}
+      <a href="#measure-{{ measure.name|slug }}" data-nav-item="{{ measure.name|lower }}">{{ measure.name }}</a>
+      {%- endfor %}
+      {%- if not visible_measures %}
+      <span class="nav-empty">No visible measures.</span>
+      {%- endif %}
+      <p class="nav-empty hidden" data-nav-empty>No match.</p>
+    </div>
+
+    <div class="nav-group" data-nav-section="tables">
+      <span class="nav-label">Tables</span>
+      {%- for table in visible_tables %}
+      <a href="#table-{{ table.name|slug }}" data-nav-item="{{ table.name|lower }}">
+        {{ table.name }}<span class="nav-count">{{ table.columns|selectattr("is_hidden", "false")|list|length }}</span>
+      </a>
+      {%- endfor %}
+      <p class="nav-empty hidden" data-nav-empty>No match.</p>
+    </div>
+
+    {%- if variant == "technical" and model.roles %}
+    <div class="nav-group">
+      <span class="nav-label">Security</span>
+      <a href="#security">Row-level security<span class="nav-count">{{ model.roles|length }}</span></a>
+    </div>
+    {%- endif %}
+
+    {%- if variant == "technical" %}
+    <div class="nav-group">
+      <span class="nav-label">Reference</span>
+      <a href="#lineage">Warehouse lineage</a>
+      <a href="#relationships">Relationships</a>
+    </div>
+    {%- endif %}
+  </nav>
+
+  <main class="main">
+
+    <header>
+      <p class="eyebrow">{{ "Report author's guide" if variant == "business" else "Technical reference" }}</p>
+      <h1 class="page-title">{{ heading }}</h1>
+      <p class="page-subtitle">{{ subtitle }}</p>
+    </header>
+
+    {#- The trust statement. Generated documentation is only useful if the reader knows
+        what was checked, so this sits above the content rather than in a footnote. -#}
+    <div class="verification {{ verification_state }}">
+      <div class="verification-item">
+        <span class="label">Model objects</span>
+        <span class="value">{{ model.tables|length }} tables &middot; {{ model.all_measures|length }} measures</span>
+      </div>
+      <div class="verification-item">
+        <span class="label">Storage mode</span>
+        <span class="value">{{ model.storage_mode.value }}</span>
+      </div>
+      {%- if validation %}
+      <div class="verification-item">
+        <span class="label">Identifiers checked</span>
+        <span class="value {{ 'bad' if validation.identifiers_failed else 'ok' }}">
+          {{ validation.identifiers_checked }}{% if validation.identifiers_failed %} &middot; {{ validation.identifiers_failed|length }} failed{% endif %}
+        </span>
+      </div>
+      <div class="verification-item">
+        <span class="label">DAX executed</span>
+        <span class="value {{ 'bad' if validation.dax_snippets_failed else 'ok' }}">
+          {{ validation.dax_snippets_checked }}{% if validation.dax_snippets_failed %} &middot; {{ validation.dax_snippets_failed|length }} failed{% endif %}
+        </span>
+      </div>
+      {%- else %}
+      <div class="verification-item">
+        <span class="label">Narrative</span>
+        <span class="value">Not generated — extracted facts only</span>
+      </div>
+      {%- endif %}
+    </div>
+
+    <!-- Overview -->
+    <section id="overview">
+      <div>
+        <p class="eyebrow">Overview</p>
+        <h2 class="section-title">What this model is for</h2>
+      </div>
+      {%- if model.description %}
+      <p class="section-note">{{ model.description }} {{ provenance("model") }}</p>
+      {%- endif %}
+      {%- if narrative and narrative.model_purpose %}
+      <p class="section-note">{{ narrative.model_purpose }} {{ provenance("generated") }}</p>
+      {%- endif %}
+      {%- if not model.description and not (narrative and narrative.model_purpose) %}
+      <p class="section-note">This model carries no description, and no narrative was generated. The structure below is read directly from the model definition.</p>
+      {%- endif %}
+
+      {%- if date_table %}
+      <p class="section-note">
+        Time intelligence runs off <code>'{{ date_table.name }}'</code>, the model's marked date table.
+        Filter dates through that table rather than through date columns on fact tables, or functions
+        like <code>SAMEPERIODLASTYEAR</code> will return blank.
+      </p>
+      {%- endif %}
+    </section>
+
+    {#- Questions come before structure: a report author arrives with a requirement, not
+        with curiosity about the schema. -#}
+    {%- if narrative and narrative.questions_answered %}
+    <section id="questions">
+      <div>
+        <p class="eyebrow">Getting answers</p>
+        <h2 class="section-title">What you can answer with this model</h2>
+        <p class="section-note">Every field named below exists in the model, and every DAX snippet was executed against it before publishing.</p>
+      </div>
+      <ul class="qa-list">
+        {%- for item in narrative.questions_answered %}
+        <li class="qa-item">
+          <p class="question">{{ item.question }}</p>
+          <p class="approach">{{ item.approach }}</p>
+          {{ ref_chips(item.fields) }}
+          {%- if item.dax %}
+          <div class="dax-block">
+            <span class="dax-label">
+              DAX
+              {%- if item.dax_verified %}<span class="verified-tag">executed successfully</span>
+              {%- elif item.dax_verified is false %}<span class="unverified-tag">did not execute</span>
+              {%- endif %}
+            </span>
+            <pre><code>{{ item.dax }}</code></pre>
+          </div>
+          {%- endif %}
+        </li>
+        {%- endfor %}
+      </ul>
+    </section>
+    {%- endif %}
+
+    <!-- Data model -->
+    <section id="data-model">
+      <div>
+        <p class="eyebrow">Structure</p>
+        <h2 class="section-title">How the tables connect</h2>
+        <p class="section-note">
+          Arrows point the way filters travel, not the way keys point. A slicer on a table
+          filters everything downstream of it.
+        </p>
+      </div>
+      {{ diagram(
+        star_schema,
+        none,
+        'Solid arrow: active relationship &middot; Dashed: inactive, needs <code>USERELATIONSHIP</code> &middot; Double arrow: filters both ways'
+      ) }}
+
+      {%- if disconnected_tables %}
+      <div class="caution">
+        <span class="caution-label">note</span>
+        <p>
+          {% for t in disconnected_tables %}<code>'{{ t.name }}'</code>{{ ", " if not loop.last }}{% endfor %}
+          {{ "has" if disconnected_tables|length == 1 else "have" }} no relationships to anything else.
+          Slicers on {{ "it" if disconnected_tables|length == 1 else "them" }} will not filter your visuals
+          unless a measure reads {{ "it" if disconnected_tables|length == 1 else "them" }} explicitly.
+        </p>
+      </div>
+      {%- endif %}
+
+      {%- if inactive_relationships %}
+      <div class="caution">
+        <span class="caution-label">inactive</span>
+        <p>
+          {% for r in inactive_relationships -%}
+          <code>'{{ r.from_table }}'[{{ r.from_column }}]</code> &rarr; <code>'{{ r.to_table }}'[{{ r.to_column }}]</code>{{ "; " if not loop.last }}
+          {%- endfor %}.
+          {{ "This relationship does" if inactive_relationships|length == 1 else "These relationships do" }}
+          nothing until a measure invokes
+          {{ "it" if inactive_relationships|length == 1 else "them" }} with
+          <code>USERELATIONSHIP</code>. Dropping the column into a visual will not join as you expect.
+        </p>
+      </div>
+      {%- endif %}
+    </section>
+
+    {%- if narrative and narrative.gotchas %}
+    <section id="gotchas">
+      <div>
+        <p class="eyebrow">Before you build</p>
+        <h2 class="section-title">Watch out for</h2>
+      </div>
+      {%- for gotcha in narrative.gotchas %}
+      <div class="card">
+        <div class="card-header">
+          <h3 class="entry-title">{{ gotcha.title }}</h3>
+          <span class="spacer"></span>
+          {{ provenance("generated") }}
+        </div>
+        <div class="card-body">
+          <p>{{ gotcha.detail }}</p>
+          {{ ref_chips(gotcha.affects) }}
+        </div>
+      </div>
+      {%- endfor %}
+    </section>
+    {%- endif %}
+
+    <!-- Measures -->
+    <section id="measures">
+      <div>
+        <p class="eyebrow">Calculations</p>
+        <h2 class="section-title">Measures</h2>
+        <p class="section-note">
+          {%- if variant == "business" -%}
+          Pre-built calculations. Drop these into a visual rather than summing columns yourself — they handle the edge cases.
+          {%- else -%}
+          Definitions are verbatim from the model. Base measures are listed before the measures built on them.
+          {%- endif -%}
+        </p>
+      </div>
+
+      {%- for measure in ordered_measures %}
+      <div class="card" id="measure-{{ measure.name|slug }}" data-search-item="{{ measure.name|lower }}">
+        <div class="card-header">
+          <h3 class="entry-title">{{ measure.name }}</h3>
+          {%- if measure.display_folder %}
+          <span class="chip">{{ measure.display_folder }}</span>
+          {%- endif %}
+          {%- if measure.format_string %}
+          <span class="chip">{{ measure.format_string }}</span>
+          {%- endif %}
+          {%- if not measure.depends_on|selectattr("measure")|list %}
+          <span class="chip">base</span>
+          {%- endif %}
+          <span class="spacer"></span>
+          {%- if measure.description %}{{ provenance("model") }}{% endif %}
+        </div>
+        <div class="card-body">
+          {%- if measure.description %}
+          <p>{{ measure.description }}</p>
+          {%- endif %}
+          {%- set mn = narrative.measures.get(measure.name) if narrative else none %}
+          {%- if mn %}
+          <p>{{ mn.plain_english }} {{ provenance("generated") }}</p>
+          {%- if mn.when_to_use %}
+          <p><strong>When to use:</strong> {{ mn.when_to_use }}</p>
+          {%- endif %}
+          {%- endif %}
+          {%- if not measure.description and not mn %}
+          <p class="section-note"><em>No description in the model.</em></p>
+          {%- endif %}
+
+          {%- if variant == "technical" %}
+          <div class="dax-block">
+            <span class="dax-label">Definition</span>
+            <pre><code>{{ measure.expression }}</code></pre>
+          </div>
+          {%- if measure.depends_on %}
+          <div>
+            <span class="dax-label">Built from</span>
+            {{ ref_chips(measure.depends_on) }}
+          </div>
+          {%- endif %}
+          {%- endif %}
+        </div>
+      </div>
+      {%- endfor %}
+
+      {%- if measure_dependencies %}
+      <div>
+        <h3 class="entry-title">Measure dependencies</h3>
+        <p class="diagram-caption">Which measures build on which. Bold outlines are base measures — learn those first.</p>
+      </div>
+      {{ diagram(measure_dependencies, none, none) }}
+      {%- endif %}
+    </section>
+
+    <!-- Tables -->
+    <section id="tables">
+      <div>
+        <p class="eyebrow">Fields</p>
+        <h2 class="section-title">Tables and columns</h2>
+        <p class="section-note">
+          {%- if variant == "business" -%}
+          The fields you can slice, filter, and group by. Internal key columns are omitted.
+          {%- else -%}
+          Hidden columns are included and marked, since they still matter when reading DAX.
+          {%- endif -%}
+        </p>
+      </div>
+
+      {%- for table in visible_tables %}
+      <div class="card" id="table-{{ table.name|slug }}" data-search-item="{{ table.name|lower }}">
+        <div class="card-header">
+          <h3 class="entry-title">{{ table.name }}</h3>
+          {{ kind_chip(table) }}
+          {%- if variant == "technical" %}
+          <span class="chip">{{ table.storage_mode.value }}</span>
+          {%- endif %}
+          <span class="spacer"></span>
+          {%- if table.description %}{{ provenance("model") }}{% endif %}
+        </div>
+        <div class="card-body">
+          {%- if table.description %}
+          <p>{{ table.description }}</p>
+          {%- endif %}
+          {%- set tn = narrative.tables.get(table.name) if narrative else none %}
+          {%- if tn %}
+          <p>{{ tn.business_description }} {{ provenance("generated") }}</p>
+          {%- if tn.grain %}
+          <p><strong>One row per:</strong> {{ tn.grain }}</p>
+          {%- endif %}
+          {%- endif %}
+          {%- if not table.description and not tn %}
+          <p class="section-note"><em>No description in the model.</em></p>
+          {%- endif %}
+
+          {%- if variant == "technical" and table.source.warehouse_table %}
+          <p class="lineage-line">
+            {{ table.source.warehouse_schema ~ "." if table.source.warehouse_schema }}{{ table.source.warehouse_table }}
+            <span class="arrow">&rarr;</span>{{ table.name }}
+          </p>
+          {%- endif %}
+
+          {%- set cols = table.columns if variant == "technical" else table.columns|rejectattr("is_hidden")|list %}
+          {%- if cols %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Column</th>
+                  {%- if variant == "technical" %}<th>Type</th>{% endif %}
+                  <th>Description</th>
+                  {%- if variant == "technical" %}<th>Source column</th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {%- for col in cols %}
+                <tr>
+                  <td class="name">
+                    {{ col.name }}
+                    {%- if col.is_hidden %} <span class="chip hidden-flag">hidden</span>{% endif %}
+                    {%- if col.is_key %} <span class="chip">key</span>{% endif %}
+                  </td>
+                  {%- if variant == "technical" %}<td class="type">{{ col.data_type }}</td>{% endif %}
+                  {%- if col.description %}
+                  <td class="desc">{{ col.description }}</td>
+                  {%- else %}
+                  <td class="desc missing">&mdash;</td>
+                  {%- endif %}
+                  {%- if variant == "technical" %}<td class="type">{{ col.source_column or "—" }}</td>{% endif %}
+                </tr>
+                {%- endfor %}
+              </tbody>
+            </table>
+          </div>
+          {%- endif %}
+
+          {%- if table.hierarchies %}
+          <div>
+            <span class="dax-label">Hierarchies</span>
+            <div class="field-list">
+              {%- for h in table.hierarchies %}
+              <span class="chip">{{ h.name }}: {{ h.levels|join(" › ") }}</span>
+              {%- endfor %}
+            </div>
+          </div>
+          {%- endif %}
+        </div>
+      </div>
+      {%- endfor %}
+    </section>
+
+    {%- if narrative and narrative.report_recipes %}
+    <section id="recipes">
+      <div>
+        <p class="eyebrow">Worked examples</p>
+        <h2 class="section-title">Building common reports</h2>
+      </div>
+      {%- for recipe in narrative.report_recipes %}
+      <div class="card">
+        <div class="card-header">
+          <h3 class="entry-title">{{ recipe.requirement }}</h3>
+          {%- if recipe.visual %}<span class="chip">{{ recipe.visual }}</span>{% endif %}
+          <span class="spacer"></span>
+          {{ provenance("generated") }}
+        </div>
+        <div class="card-body">
+          {%- if recipe.measures %}
+          <div><span class="dax-label">Measures</span>{{ ref_chips(recipe.measures) }}</div>
+          {%- endif %}
+          {%- if recipe.fields %}
+          <div><span class="dax-label">Fields</span>{{ ref_chips(recipe.fields) }}</div>
+          {%- endif %}
+          {%- if recipe.steps %}
+          <ol class="recipe-steps">
+            {%- for step in recipe.steps %}
+            <li>{{ step }}</li>
+            {%- endfor %}
+          </ol>
+          {%- endif %}
+        </div>
+      </div>
+      {%- endfor %}
+    </section>
+    {%- endif %}
+
+    {%- if variant == "technical" %}
+    <!-- Relationships -->
+    <section id="relationships">
+      <div>
+        <p class="eyebrow">Reference</p>
+        <h2 class="section-title">Relationships</h2>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>From</th><th>To</th><th>Cardinality</th><th>Cross-filter</th><th>State</th>
+            </tr>
+          </thead>
+          <tbody>
+            {%- for rel in model.relationships %}
+            <tr>
+              <td class="type">'{{ rel.from_table }}'[{{ rel.from_column }}]</td>
+              <td class="type">'{{ rel.to_table }}'[{{ rel.to_column }}]</td>
+              <td class="type">{{ rel.from_cardinality }} &rarr; {{ rel.to_cardinality }}</td>
+              <td class="type">{{ rel.cross_filter_direction }}</td>
+              <td>
+                {%- if rel.is_active %}<span class="chip">active</span>
+                {%- else %}<span class="chip disconnected">inactive</span>{% endif %}
+              </td>
+            </tr>
+            {%- endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Lineage -->
+    <section id="lineage">
+      <div>
+        <p class="eyebrow">Reference</p>
+        <h2 class="section-title">Where the data comes from</h2>
+        <p class="section-note">
+          Each model table mapped back to the warehouse object it reads. Tables built from a
+          DAX expression have no warehouse source.
+        </p>
+      </div>
+      {{ diagram(warehouse_lineage, none, none) }}
+    </section>
+
+    {%- if model.roles %}
+    <!-- Security -->
+    <section id="security">
+      <div>
+        <p class="eyebrow">Reference</p>
+        <h2 class="section-title">Row-level security</h2>
+        <p class="section-note">
+          These filters apply to anyone in the role. Totals will differ between users, and
+          between a role member and a workspace admin — check which role you are testing under
+          before reporting a number as wrong.
+        </p>
+      </div>
+      {%- for role in model.roles %}
+      <div class="card">
+        <div class="card-header">
+          <h3 class="entry-title">{{ role.name }}</h3>
+          {%- if role.model_permission %}<span class="chip">{{ role.model_permission }}</span>{% endif %}
+        </div>
+        <div class="card-body">
+          {%- if role.description %}<p>{{ role.description }}</p>{% endif %}
+          {%- for perm in role.table_permissions %}
+          <div class="dax-block">
+            <span class="dax-label">{{ perm.table }}</span>
+            <pre><code>{{ perm.filter_expression }}</code></pre>
+          </div>
+          {%- endfor %}
+        </div>
+      </div>
+      {%- endfor %}
+    </section>
+    {%- endif %}
+    {%- endif %}
+
+    <footer class="page-footer">
+      <span>Generated by semdoc {{ tool_version }} from the model definition{% if generated_at %} on {{ generated_at }}{% endif %}.</span>
+      <span>Structure, DAX definitions, and lineage are read from the model. Narrative sections are marked <span class="provenance generated">generated &amp; verified</span>.</span>
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  var input = document.getElementById("nav-filter");
+  if (!input) return;
+
+  var navItems = Array.prototype.slice.call(document.querySelectorAll("[data-nav-item]"));
+  var cards = Array.prototype.slice.call(document.querySelectorAll("[data-search-item]"));
+  var emptyNotes = Array.prototype.slice.call(document.querySelectorAll("[data-nav-empty]"));
+
+  function apply() {
+    var q = input.value.trim().toLowerCase();
+
+    navItems.forEach(function (el) {
+      el.classList.toggle("hidden", q !== "" && el.dataset.navItem.indexOf(q) === -1);
+    });
+    cards.forEach(function (el) {
+      el.classList.toggle("hidden", q !== "" && el.dataset.searchItem.indexOf(q) === -1);
+    });
+
+    emptyNotes.forEach(function (note) {
+      var group = note.closest("[data-nav-section]");
+      if (!group) return;
+      var anyVisible = Array.prototype.some.call(
+        group.querySelectorAll("[data-nav-item]"),
+        function (el) { return !el.classList.contains("hidden"); }
+      );
+      note.classList.toggle("hidden", anyVisible);
+    });
+  }
+
+  input.addEventListener("input", apply);
+  input.addEventListener("search", apply);
+})();
+</script>
+{%- if standalone %}
+</body>
+</html>
+{%- endif %}
