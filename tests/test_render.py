@@ -165,6 +165,22 @@ def test_technical_variant_includes_dax_and_security(ir):
     assert "dbo.fact_service" in html
 
 
+def test_technical_variant_shows_bpa_findings(ir):
+    # The fixture's Units/Target Value columns are visible doubles with no format string
+    # and no explicit SummarizeBy=None — real findings, not fabricated for the test.
+    html = render_guide(ir, "technical")
+    assert 'id="bpa"' in html
+    assert "META_AVOID_FLOAT" in html
+    assert "TabularEditor/BestPracticeRules" in html
+
+
+def test_business_variant_omits_bpa_findings(ir):
+    # Model-quality findings are a maintainer concern, not a report-building one.
+    html = render_guide(ir, "business")
+    assert 'id="bpa"' not in html
+    assert "META_AVOID_FLOAT" not in html
+
+
 def test_business_variant_withholds_implementation_detail(ir):
     html = render_guide(ir, "business")
     # No verbatim DAX bodies, no RLS expressions, no warehouse object names.

@@ -156,6 +156,7 @@
     <div class="nav-group">
       <span class="nav-label">Reference</span>
       <a href="#lineage">Warehouse lineage</a>
+      <a href="#bpa">Best practice findings<span class="nav-count">{{ model.bpa_findings|length }}</span></a>
       <a href="#relationships">Relationships</a>
     </div>
     {%- endif %}
@@ -576,6 +577,48 @@
         </p>
       </div>
       {{ diagram(warehouse_lineage, none, none) }}
+    </section>
+
+    <!-- Best Practice Findings -->
+    <section id="bpa">
+      <div>
+        <p class="eyebrow">Reference</p>
+        <h2 class="section-title">Best practice findings</h2>
+        <p class="section-note">
+          Deterministic checks ported from the community <a href="https://github.com/TabularEditor/BestPracticeRules">Tabular Editor Best Practice Rules</a>.
+          This is a model-quality audit for whoever maintains this model — not a
+          report-building concern, which is why it only appears here.
+        </p>
+      </div>
+      {%- if not bpa_by_category %}
+      <p class="section-note"><em>No findings from the checks currently implemented.</em></p>
+      {%- else %}
+      {%- for category, findings in bpa_by_category %}
+      <details class="bpa-category">
+        <summary>
+          <span class="bpa-category-label">{{ category }}</span>
+          <span class="nav-count">{{ findings|length }}</span>
+        </summary>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Severity</th><th>Object</th><th>Rule</th><th>Finding</th></tr>
+            </thead>
+            <tbody>
+              {%- for f in findings %}
+              <tr>
+                <td><span class="chip bpa-{{ f.severity }}">{{ f.severity }}</span></td>
+                <td class="type">{{ f.object_name }}</td>
+                <td class="type">{{ f.rule_id }}</td>
+                <td class="desc">{{ f.message }}</td>
+              </tr>
+              {%- endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {%- endfor %}
+      {%- endif %}
     </section>
 
     {%- if model.roles %}

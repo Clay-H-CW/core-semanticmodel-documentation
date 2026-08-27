@@ -511,6 +511,71 @@ section {
   font-style: italic;
 }
 
+.chip.bpa-info {
+  color: var(--text-muted);
+}
+
+.chip.bpa-warning {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.chip.bpa-error {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Best Practice Analyzer findings, grouped by category. Same collapsible mechanism as
+   the sidebar's measure/table folders — closed by default so a model with many findings
+   doesn't turn this into a wall of rows. */
+.bpa-category {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.bpa-category summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface-alt);
+}
+
+.bpa-category summary::-webkit-details-marker {
+  display: none;
+}
+
+.bpa-category summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  transition: transform 0.12s ease;
+}
+
+.bpa-category[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.bpa-category-label {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  flex: 1 1 auto;
+}
+
+.bpa-category .table-scroll {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
 /* ---- cards ------------------------------------------------------------------------ */
 
 .card {

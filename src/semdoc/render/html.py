@@ -57,6 +57,25 @@ def _measure_groups(measures: list[Measure]) -> list[tuple[str, list[Measure]]]:
     return [(key, groups[key]) for key in ordered_keys]
 
 
+_SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
+
+
+def _bpa_by_category(model: Model) -> list[tuple[str, list]]:
+    """Group BPA findings by category for the technical guide's findings section.
+
+    Sorted by category name, and within a category by severity (error first) so the
+    things most worth a maintainer's attention aren't buried under low-priority notes.
+    """
+    groups: dict[str, list] = {}
+    for finding in model.bpa_findings:
+        groups.setdefault(finding.category, []).append(finding)
+
+    for findings in groups.values():
+        findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.rule_id, f.object_name))
+
+    return [(category, groups[category]) for category in sorted(groups)]
+
+
 def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
     """Split tables into pinned (measure-hosting) and name-prefix groups, for the sidebar.
 
@@ -174,6 +193,7 @@ def _context(
         "has_dax_snippets": bool(
             ir.narrative and any(q.dax for q in ir.narrative.questions_answered)
         ),
+        "bpa_by_category": _bpa_by_category(model),
         "disconnected_tables": [
             t for t in visible_tables if t.kind is TableKind.DISCONNECTED
         ],

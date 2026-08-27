@@ -125,6 +125,7 @@ class Hierarchy(IRBase):
     name: str
     description: str | None = None
     is_hidden: bool = False
+    display_folder: str | None = None
     levels: list[str] = Field(default_factory=list)
 
 
@@ -153,6 +154,11 @@ class Table(IRBase):
     description: str | None = None
     is_hidden: bool = False
     is_date_table: bool = False
+    # Power BI's "Auto date/time" feature silently generates one hidden calendar table
+    # per date/datetime column, marked with a `__PBI_LocalDateTable` annotation in TMSL.
+    # Flagged by the BPA rule DIABLE_AUTO_DATE/TIME — these tables are pure bloat once a
+    # real shared Date table exists.
+    is_auto_date_table: bool = False
     kind: TableKind = TableKind.UNKNOWN
     storage_mode: StorageMode = StorageMode.UNKNOWN
     row_count: int | None = None
@@ -195,6 +201,23 @@ class Role(IRBase):
     table_permissions: list[RoleTablePermission] = Field(default_factory=list)
 
 
+class BpaFinding(IRBase):
+    """One Best Practice Analyzer violation.
+
+    Ported from the community-maintained Tabular Editor rule set
+    (github.com/TabularEditor/BestPracticeRules) directly onto this IR — deterministic
+    model-quality checks, not narrative, so these need no "verified" badge the way
+    LLM-authored content does: the check itself is the verification.
+    """
+
+    rule_id: str
+    category: str
+    severity: str  # "info" | "warning" | "error" — the rule set's own 1/2/3 scale
+    message: str
+    object_type: str
+    object_name: str
+
+
 class Model(IRBase):
     name: str
     workspace: str | None = None
@@ -205,6 +228,7 @@ class Model(IRBase):
     tables: list[Table] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
     roles: list[Role] = Field(default_factory=list)
+    bpa_findings: list[BpaFinding] = Field(default_factory=list)
 
     def table(self, name: str) -> Table | None:
         return next((t for t in self.tables if t.name == name), None)

@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import re
 
+from semdoc.bpa import run_bpa
+from semdoc.dax_text import BARE_REF as _BARE_REF
+from semdoc.dax_text import QUALIFIED_REF as _QUALIFIED_REF
+from semdoc.dax_text import strip_dax_noise as _strip_dax_noise
 from semdoc.ir.schema import (
     Column,
     Hierarchy,
@@ -33,19 +37,6 @@ _PARTITION_MODES = {
     "directquery": StorageMode.DIRECT_QUERY,
     "dual": StorageMode.DUAL,
 }
-
-# DAX reference patterns. Applied only after comments and string literals are stripped,
-# so that text inside a quoted string cannot masquerade as an identifier.
-_QUALIFIED_REF = re.compile(r"'([^']+)'\[([^\]]+)\]|(\b\w+)\[([^\]]+)\]")
-_BARE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
-
-
-def _strip_dax_noise(expression: str) -> str:
-    """Remove comments and string literals so reference matching cannot false-positive."""
-    without_block = re.sub(r"/\*.*?\*/", " ", expression, flags=re.S)
-    without_line = re.sub(r"(--|//)[^\n]*", " ", without_block)
-    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', without_line)
-
 
 def _partition_mode(raw: str | None) -> StorageMode:
     return _PARTITION_MODES.get((raw or "").replace(" ", "").casefold(), StorageMode.UNKNOWN)
@@ -140,6 +131,10 @@ def _joined(value: object) -> str | None:
     return str(value)
 
 
+def _has_annotation(raw: dict, name: str) -> bool:
+    return any(a.get("name") == name for a in raw.get("annotations", []))
+
+
 def _build_table(raw: dict) -> Table:
     partitions = [
         Partition(
@@ -163,6 +158,7 @@ def _build_table(raw: dict) -> Table:
             name=h.get("name", "?"),
             description=_joined(h.get("description")),
             is_hidden=bool(h.get("isHidden", False)),
+            display_folder=h.get("displayFolder"),
             levels=[lvl.get("column", lvl.get("name", "?")) for lvl in h.get("levels", [])],
         )
         for h in raw.get("hierarchies", [])
@@ -177,6 +173,7 @@ def _build_table(raw: dict) -> Table:
         # `dataCategory: Time` is how a model marks its official date table. Report
         # authors need this called out: it is what makes time intelligence work.
         is_date_table=(raw.get("dataCategory") == "Time"),
+        is_auto_date_table=_has_annotation(raw, "__PBI_LocalDateTable"),
         kind=kind,
         storage_mode=storage_mode,
         source=partitions[0].source if partitions else TableSource(),
@@ -341,6 +338,7 @@ def tmsl_to_model(tmsl: dict, *, name: str, workspace: str | None = None, model_
 
     _classify_tables(model)
     _resolve_measure_dependencies(model)
+    model.bpa_findings = run_bpa(model)
     return model
 
 
