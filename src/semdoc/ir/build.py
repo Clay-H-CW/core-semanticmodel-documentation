@@ -68,12 +68,12 @@ def _partition_source(raw_source: dict) -> TableSource:
         )
 
     if source_type == "calculated":
-        return TableSource(kind=SourceKind.CALCULATED, expression=raw_source.get("expression"))
+        return TableSource(kind=SourceKind.CALCULATED, expression=_joined(raw_source.get("expression")))
 
     if source_type == "m":
-        expression = raw_source.get("expression")
-        if isinstance(expression, list):
-            expression = "\n".join(expression)
+        # TMSL stores multi-line expressions as arrays of lines (same shape as
+        # descriptions and measure DAX below) — collapse before parsing or regex-matching.
+        expression = _joined(raw_source.get("expression"))
         return TableSource(
             kind=SourceKind.M_QUERY,
             expression=expression,
@@ -252,11 +252,24 @@ def _resolve_measure_dependencies(model: Model) -> None:
 
     Powers the dependency diagram, and lets the guide present base measures before the
     ones built on top of them.
+
+    Matching is case-insensitive because DAX identifiers are: the engine resolves
+    `'hmis Enrollment'[EnrollmenttoMoveInDays]` against a column actually named
+    `EnrollmentToMoveInDays` without complaint, so a case-sensitive matcher here would
+    silently drop real dependencies for measures already deployed and working. Refs are
+    still emitted with the model's canonical casing, not whatever casing the DAX author
+    happened to type.
     """
-    measure_names = {m.name for m in model.all_measures}
-    columns_by_table = {t.name: {c.name for c in t.columns} for t in model.tables}
+    # casefold(name) -> canonical name, at each level a DAX expression can reference.
+    measures_ci = {m.name.casefold(): m.name for m in model.all_measures}
+    tables_ci = {t.name.casefold(): t.name for t in model.tables}
+    columns_ci_by_table_ci = {
+        t.name.casefold(): {c.name.casefold(): c.name for c in t.columns} for t in model.tables
+    }
 
     for table in model.tables:
+        own_columns_ci = columns_ci_by_table_ci.get(table.name.casefold(), {})
+
         for measure in table.measures:
             expression = _strip_dax_noise(measure.expression)
             refs: list[Ref] = []
@@ -271,16 +284,19 @@ def _resolve_measure_dependencies(model: Model) -> None:
             for match in _QUALIFIED_REF.finditer(expression):
                 table_name = match.group(1) or match.group(3)
                 column_name = match.group(2) or match.group(4)
-                if table_name in columns_by_table and column_name in columns_by_table[table_name]:
-                    add(Ref(table=table_name, column=column_name))
+                table_columns_ci = columns_ci_by_table_ci.get(table_name.casefold())
+                if table_columns_ci is not None:
+                    resolved_column = table_columns_ci.get(column_name.casefold())
+                    if resolved_column is not None:
+                        add(Ref(table=tables_ci[table_name.casefold()], column=resolved_column))
 
             for match in _BARE_REF.finditer(expression):
-                name = match.group(1)
-                if name in measure_names:
-                    add(Ref(measure=name))
-                elif name in columns_by_table.get(table.name, set()):
+                name_ci = match.group(1).casefold()
+                if name_ci in measures_ci:
+                    add(Ref(measure=measures_ci[name_ci]))
+                elif name_ci in own_columns_ci:
                     # An unqualified reference resolves against the measure's own table.
-                    add(Ref(table=table.name, column=name))
+                    add(Ref(table=table.name, column=own_columns_ci[name_ci]))
 
             measure.depends_on = refs
 

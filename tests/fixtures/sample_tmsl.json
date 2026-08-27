@@ -284,7 +284,12 @@
             "mode": "import",
             "source": {
               "type": "calculated",
-              "expression": "DATATABLE ( \"Metric\", STRING, \"Target Value\", DOUBLE, { { \"Units\", 1000.0 } } )"
+              "expression": [
+                "DATATABLE (",
+                "    \"Metric\", STRING, \"Target Value\", DOUBLE,",
+                "    { { \"Units\", 1000.0 } }",
+                ")"
+              ]
             }
           }
         ]

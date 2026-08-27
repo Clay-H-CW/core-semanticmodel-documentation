@@ -72,6 +72,14 @@ def test_calculated_table_has_no_warehouse_lineage(model):
     assert source.warehouse_table is None
 
 
+def test_calculated_table_expression_lines_are_joined(model):
+    # TMSL returns multi-line calculated-table expressions as an array of lines, the
+    # same shape as descriptions and measure DAX. A real HMIS model hit this; the
+    # fixture didn't, because it originally used a single-line expression string.
+    source = model.table("Targets").source
+    assert source.expression == 'DATATABLE (\n    "Metric", STRING, "Target Value", DOUBLE,\n    { { "Units", 1000.0 } }\n)'
+
+
 def test_storage_mode_per_table(model):
     assert model.table("Service Fact").storage_mode is StorageMode.DIRECT_LAKE
     assert model.table("Program").storage_mode is StorageMode.IMPORT
@@ -110,6 +118,39 @@ def test_measure_dependencies_span_tables(model):
     depends = {str(d) for d in yoy.depends_on}
     assert "[Total Units]" in depends
     assert "'Date'[Date]" in depends
+
+
+def test_measure_dependencies_match_dax_case_insensitively():
+    # DAX identifiers are case-insensitive in the engine — a measure referencing
+    # 'service fact'[units] (lowercase) against a column actually named
+    # 'Service Fact'[Units] still deploys and runs. A real HMIS model shipped exactly
+    # this shape and a case-sensitive matcher silently dropped the dependency.
+    # Canonical casing from the model, not the DAX author's typing, must show up in
+    # the resolved Ref. Uses its own model, not the shared fixture, since resolving
+    # dependencies mutates measures in place.
+    from semdoc.ir.build import _resolve_measure_dependencies
+    from semdoc.ir.schema import Column, Measure, Model, Table
+
+    isolated = Model(
+        name="Case",
+        tables=[
+            Table(
+                name="Service Fact",
+                columns=[Column(name="Units")],
+                measures=[
+                    Measure(name="Total Units", expression="SUM('Service Fact'[Units])"),
+                    Measure(
+                        name="Total Units Lower",
+                        expression="SUM('service fact'[units])",
+                    ),
+                ],
+            )
+        ],
+    )
+    _resolve_measure_dependencies(isolated)
+
+    measure = isolated.measure("Total Units Lower")
+    assert [str(d) for d in measure.depends_on] == ["'Service Fact'[Units]"]
 
 
 def test_dax_comments_do_not_create_references(model):
