@@ -6,6 +6,8 @@
     semdoc render                         render guides from a stored IR
     semdoc generate --workspace W --model M  extract and render in one pass
     semdoc narrative apply FILE           validate narrative JSON against the model, attach it
+    semdoc warehouse extract              schema, view SQL, and best-effort lineage for
+                                           warehouse objects the model reads from
     semdoc serve                          serve guides locally, with the chat widget if
                                            ANTHROPIC_API_KEY is set
 
@@ -27,8 +29,8 @@ from semdoc import __version__
 from semdoc.auth import credential_from_env
 from semdoc.config import enrich_model, load_env
 from semdoc.fabric import FabricClient, FabricError
-from semdoc.ir.build import tmsl_to_model
-from semdoc.ir.schema import ModelIR, Narrative
+from semdoc.ir.build import extract_onelake_reference, extract_warehouse_connection, tmsl_to_model
+from semdoc.ir.schema import ModelIR, Narrative, Warehouse
 from semdoc.render.assets import AssetError
 from semdoc.render.html import write_guides
 from semdoc.validate import validate_identifiers
@@ -110,15 +112,32 @@ def cmd_extract(args: argparse.Namespace) -> int:
             raw_path.write_text(json.dumps(tmsl, indent=2), encoding="utf-8")
             print(f"  raw TMSL -> {raw_path}", file=sys.stderr)
 
+        # Import-mode models carry the connection directly in dataSources. DirectLake
+        # models don't — they name OneLake by workspace/item GUID instead, which needs a
+        # live Fabric lookup (still inside this `with` block) to resolve to something
+        # `semdoc warehouse extract` can actually connect to.
+        warehouse = extract_warehouse_connection(tmsl)
+        if warehouse is None:
+            onelake_ref = extract_onelake_reference(tmsl)
+            if onelake_ref:
+                resolved = client.resolve_sql_endpoint(*onelake_ref)
+                if resolved:
+                    server, database = resolved
+                    warehouse = Warehouse(server=server, database=database)
+
     model = tmsl_to_model(
         tmsl,
         name=sm["displayName"],
         workspace=ws["displayName"],
         model_id=sm["id"],
     )
-    ir = ModelIR(model=model, generated_at=_now(), source_tool_version=__version__)
+    ir = ModelIR(
+        model=model, warehouse=warehouse, generated_at=_now(), source_tool_version=__version__
+    )
 
     path = _write_ir(ir, out_dir / IR_FILENAME)
+    if warehouse:
+        print(f"  warehouse: {warehouse.database} on {warehouse.server}", file=sys.stderr)
     print(
         f"  {len(model.tables)} tables, {len(model.all_measures)} measures, "
         f"{len(model.relationships)} relationships, {len(model.roles)} RLS roles",
@@ -146,6 +165,52 @@ def cmd_render(args: argparse.Namespace) -> int:
     for label, path in written.items():
         size = path.stat().st_size
         print(f"{label}\t{path}\t{size:,} bytes")
+    return 0
+
+
+def cmd_warehouse_extract(args: argparse.Namespace) -> int:
+    """Pull warehouse metadata (tiers 1-3: schema, view SQL, best-effort lineage) for
+    every warehouse object the model actually reads from, and attach it to the IR.
+    """
+    from semdoc import warehouse as warehouse_module
+
+    out_dir = pathlib.Path(args.out)
+    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    ir = _load_ir(ir_path)
+
+    if ir.warehouse is None:
+        raise SystemExit(
+            "This IR has no warehouse connection recorded. Re-run `semdoc extract` "
+            "against the model — that is what discovers the server/database."
+        )
+
+    refs = warehouse_module.referenced_objects(ir.model)
+    print(
+        f"Looking up {len(refs)} warehouse object(s) referenced by the model "
+        f"on {ir.warehouse.database} ({ir.warehouse.server})…",
+        file=sys.stderr,
+    )
+
+    try:
+        updated_warehouse, missing = warehouse_module.extract_warehouse(
+            ir.model, ir.warehouse, credential_from_env()
+        )
+    except warehouse_module.WarehouseError as exc:
+        print(f"Warehouse extraction failed: {exc}", file=sys.stderr)
+        return 4
+
+    views = sum(1 for t in updated_warehouse.tables if t.is_view)
+    print(
+        f"  {len(updated_warehouse.tables)} object(s) found ({views} views), "
+        f"{len(missing)} referenced by the model but not found",
+        file=sys.stderr,
+    )
+    for schema, name in missing:
+        print(f"    MISSING: {schema}.{name}", file=sys.stderr)
+
+    ir.warehouse = updated_warehouse
+    _write_ir(ir, ir_path)
+    print(f"Warehouse detail attached -> {ir_path}")
     return 0
 
 
@@ -387,6 +452,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Attach the narrative even if some identifiers fail to resolve.",
     )
     p_narrative_apply.set_defaults(func=cmd_narrative_apply)
+
+    p_warehouse = sub.add_parser("warehouse", help="Look up detail on the connected warehouse.")
+    warehouse_sub = p_warehouse.add_subparsers(dest="warehouse_command", required=True)
+    p_warehouse_extract = warehouse_sub.add_parser(
+        "extract",
+        help="Pull schema, view SQL, and best-effort lineage for warehouse objects the "
+        "model reads from.",
+    )
+    p_warehouse_extract.add_argument(
+        "--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME})."
+    )
+    p_warehouse_extract.set_defaults(func=cmd_warehouse_extract)
 
     p_generate = sub.add_parser("generate", help="Extract and render in one pass.")
     add_target(p_generate)

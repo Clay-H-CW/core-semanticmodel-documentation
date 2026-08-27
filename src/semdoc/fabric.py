@@ -137,6 +137,46 @@ class FabricClient:
     def list_semantic_models(self, workspace_id: str) -> list[dict]:
         return self._get_paged(f"{FABRIC_API}/workspaces/{workspace_id}/semanticModels")
 
+    def get_item(self, workspace_id: str, item_id: str) -> dict:
+        return self._request("GET", f"{FABRIC_API}/workspaces/{workspace_id}/items/{item_id}").json()
+
+    def get_warehouse(self, workspace_id: str, warehouse_id: str) -> dict:
+        return self._request(
+            "GET", f"{FABRIC_API}/workspaces/{workspace_id}/warehouses/{warehouse_id}"
+        ).json()
+
+    def get_lakehouse(self, workspace_id: str, lakehouse_id: str) -> dict:
+        return self._request(
+            "GET", f"{FABRIC_API}/workspaces/{workspace_id}/lakehouses/{lakehouse_id}"
+        ).json()
+
+    def resolve_sql_endpoint(self, workspace_id: str, item_id: str) -> tuple[str, str] | None:
+        """Resolve a workspace/item id pair to its SQL analytics endpoint (server, database).
+
+        DirectLake models reference OneLake directly by workspace/item GUID rather than a
+        connection string — this is how those GUIDs turn into something `semdoc.warehouse`
+        can actually connect to. Supports the two item types DirectLake can sit on
+        (Warehouse and Lakehouse); each exposes the connection string under a different
+        JSON path. Returns None for any other item type, or if no SQL endpoint has been
+        provisioned yet.
+        """
+        item = self.get_item(workspace_id, item_id)
+        item_type = item.get("type")
+        display_name = item.get("displayName", "")
+
+        if item_type == "Warehouse":
+            details = self.get_warehouse(workspace_id, item_id)
+            server = details.get("properties", {}).get("connectionString")
+        elif item_type == "Lakehouse":
+            details = self.get_lakehouse(workspace_id, item_id)
+            server = (details.get("properties") or {}).get("sqlEndpointProperties", {}).get(
+                "connectionString"
+            )
+        else:
+            return None
+
+        return (server, display_name) if server else None
+
     def find_semantic_model(self, workspace_id: str, name: str) -> dict:
         models = self.list_semantic_models(workspace_id)
         lowered = name.casefold()

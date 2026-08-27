@@ -26,6 +26,12 @@ import msal
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
 
+# The Fabric Warehouse SQL analytics endpoint speaks TDS and authenticates like Azure SQL
+# Database — same resource audience, regardless of it being a Fabric item rather than a
+# standalone Azure SQL server. This is a third, separate scope from the two above; the
+# first sign-in after adding warehouse extraction will prompt for this consent.
+SQL_SCOPE = "https://database.windows.net/.default"
+
 # Microsoft Azure PowerShell public client. Pre-consented in most tenants, which means
 # interactive sign-in works without registering an app first. Override with
 # SEMDOC_CLIENT_ID if your tenant blocks it.

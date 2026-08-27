@@ -24,6 +24,7 @@ from semdoc.ir.schema import (
     Table,
     TableKind,
     TableSource,
+    Warehouse,
 )
 
 _PARTITION_MODES = {
@@ -341,3 +342,57 @@ def tmsl_to_model(tmsl: dict, *, name: str, workspace: str | None = None, model_
     _classify_tables(model)
     _resolve_measure_dependencies(model)
     return model
+
+
+def extract_warehouse_connection(tmsl: dict) -> Warehouse | None:
+    """Recover the warehouse server/database the model itself connects to.
+
+    TMSL's `model.dataSources` array carries this directly — the model's own Import-mode
+    partitions authenticate against it, so it is guaranteed accurate, unlike parsing a
+    hostname out of free-text M (which is what `_warehouse_ref_from_m` has to fall back to
+    for schema/table names, since those are not repeated here). Returns a `Warehouse` with
+    no tables yet; a later pass (`semdoc.warehouse`) fills those in via the SQL endpoint.
+
+    Only a structured/tds data source is recognized — that is what a Fabric Warehouse or
+    Lakehouse SQL endpoint looks like. A model with none (e.g. everything DirectLake, or a
+    non-SQL source) returns None rather than a guess.
+    """
+    body = tmsl.get("model", tmsl)
+    for source in body.get("dataSources", []):
+        if source.get("type") != "structured":
+            continue
+        details = source.get("connectionDetails") or {}
+        if details.get("protocol") != "tds":
+            continue
+        address = details.get("address") or {}
+        server, database = address.get("server"), address.get("database")
+        if server and database:
+            return Warehouse(server=server, database=database)
+    return None
+
+
+_ONELAKE_URL = re.compile(
+    r"onelake\.dfs\.fabric\.microsoft\.com/([0-9a-fA-F-]{36})/([0-9a-fA-F-]{36})"
+)
+
+
+def extract_onelake_reference(tmsl: dict) -> tuple[str, str] | None:
+    """Recover the (workspace_id, item_id) a DirectLake model's shared expression names.
+
+    DirectLake models have no `dataSources` entry — every table's `entity` partition
+    reads through a single shared `expressions` entry (an `AzureStorage.DataLake(...)` M
+    query) that names OneLake directly by workspace and item GUID, not a SQL connection
+    string. Turning those GUIDs into something connectable needs a live Fabric REST call
+    (`FabricClient.resolve_sql_endpoint`) — this function only recovers the identifiers.
+    """
+    body = tmsl.get("model", tmsl)
+    for expr in body.get("expressions", []):
+        if expr.get("kind") != "m":
+            continue
+        text = _joined(expr.get("expression"))
+        if not text:
+            continue
+        match = _ONELAKE_URL.search(text)
+        if match:
+            return match.group(1), match.group(2)
+    return None

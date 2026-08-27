@@ -240,6 +240,17 @@ class WarehouseTable(IRBase):
     name: str
     description: str | None = None
     row_count: int | None = None
+    is_view: bool = False
+    # Verbatim SQL from INFORMATION_SCHEMA.VIEWS / sys.sql_modules, view objects only.
+    # Shown to the reader as-is; never rewritten or summarized, for the same reason DAX
+    # and M expressions elsewhere in the IR are kept verbatim.
+    view_definition: str | None = None
+    # Best-effort FROM/JOIN targets parsed out of `view_definition` — "schema.table"
+    # strings, not resolved WarehouseTable references, since the referenced object may
+    # not itself be one the model reads from (and so never gets extracted). Empty when
+    # not a view, or when nothing could be confidently parsed out. Never guessed: a
+    # missing entry here means "not extracted," not "reads from nothing."
+    reads_from: list[str] = Field(default_factory=list)
     columns: list[WarehouseColumn] = Field(default_factory=list)
     foreign_keys: list[WarehouseForeignKey] = Field(default_factory=list)
     # Model tables that read from this warehouse table. Populated by the lineage pass.

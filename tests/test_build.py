@@ -9,7 +9,7 @@ import pathlib
 
 import pytest
 
-from semdoc.ir.build import tmsl_to_model
+from semdoc.ir.build import extract_onelake_reference, extract_warehouse_connection, tmsl_to_model
 from semdoc.ir.schema import SourceKind, StorageMode, TableKind
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sample_tmsl.json"
@@ -188,3 +188,64 @@ def test_rls_role_extracted(model):
     assert len(role.table_permissions) == 1
     assert role.table_permissions[0].table == "Client"
     assert "USERPRINCIPALNAME" in role.table_permissions[0].filter_expression
+
+
+# -- warehouse connection recovery ------------------------------------------------------
+
+
+def test_extract_warehouse_connection_from_import_mode_data_sources():
+    tmsl = {
+        "model": {
+            "dataSources": [
+                {
+                    "type": "structured",
+                    "connectionDetails": {
+                        "protocol": "tds",
+                        "address": {"server": "abc.datawarehouse.fabric.microsoft.com", "database": "CaseWH"},
+                    },
+                }
+            ]
+        }
+    }
+    warehouse = extract_warehouse_connection(tmsl)
+    assert warehouse.server == "abc.datawarehouse.fabric.microsoft.com"
+    assert warehouse.database == "CaseWH"
+    assert warehouse.tables == []
+
+
+def test_extract_warehouse_connection_ignores_non_tds_sources():
+    tmsl = {"model": {"dataSources": [{"type": "structured", "connectionDetails": {"protocol": "odata"}}]}}
+    assert extract_warehouse_connection(tmsl) is None
+
+
+def test_extract_warehouse_connection_none_when_no_data_sources():
+    assert extract_warehouse_connection({"model": {}}) is None
+    assert extract_warehouse_connection({"model": {"dataSources": []}}) is None
+
+
+def test_extract_onelake_reference_from_directlake_shared_expression():
+    tmsl = {
+        "model": {
+            "expressions": [
+                {
+                    "name": "DatabaseQuery",
+                    "kind": "m",
+                    "expression": [
+                        "let",
+                        '    Source = AzureStorage.DataLake("https://onelake.dfs.fabric.microsoft.com/'
+                        '539d3d47-dc6b-4d1a-b266-ec752aafbacf/c93bbcd0-7514-40b2-aebd-13034a08ef5f", '
+                        "[HierarchicalNavigation=true])",
+                        "in",
+                        "    Source",
+                    ],
+                }
+            ]
+        }
+    }
+    ref = extract_onelake_reference(tmsl)
+    assert ref == ("539d3d47-dc6b-4d1a-b266-ec752aafbacf", "c93bbcd0-7514-40b2-aebd-13034a08ef5f")
+
+
+def test_extract_onelake_reference_none_when_no_matching_expression():
+    assert extract_onelake_reference({"model": {"expressions": []}}) is None
+    assert extract_onelake_reference({"model": {}}) is None
