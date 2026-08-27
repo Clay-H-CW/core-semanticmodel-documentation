@@ -1,0 +1,36 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+dist/
+build/
+
+# .NET
+bin/
+obj/
+*.user
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
