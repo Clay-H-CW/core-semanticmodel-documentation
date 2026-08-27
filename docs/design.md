@@ -133,6 +133,17 @@ Enrichment calls go through one interface. Claude API directly for the POC; an
 Azure-hosted or gateway provider can be substituted if governance requires it. Only
 model *metadata* is sent for enrichment — never customer data.
 
+Default model is `claude-sonnet-5` (`SEMDOC_ENRICH_MODEL` to override). Enrichment is a
+high-volume, well-constrained job — one bounded prompt per table and per measure, grounded
+in the IR and verified afterwards — which is the shape where Sonnet's price and latency pay
+off. The validation pass is what protects quality here, not model tier.
+
+### D7: Output stays local
+
+Nothing is published anywhere as a side effect of running the tool. `render` writes files
+to `out/`, and `serve` binds loopback only. Generated guides will contain real table names,
+measure DAX, and RLS filter expressions, so publishing is an explicit, separate act.
+
 ## Extraction extras worth grabbing
 
 - **Existing descriptions.** Many models already have some. These are ground truth: the

@@ -70,7 +70,7 @@ against a stored IR. Add `--save-tmsl` to keep the raw `model.bim` for use as a 
 |---|---|
 | `out/guide-technical.html` | Report builders and developers — full column inventory with data types, verbatim DAX, RLS filter expressions, warehouse lineage, relationship table |
 | `out/guide-business.html` | End users — what the model answers and how to build it; internal keys, DAX bodies, and warehouse detail omitted |
-| `out/guide-*.artifact.html` | Same content as a body fragment, for publishing as a Claude Artifact (Mermaid renders natively there) |
+| `out/guide-*.artifact.html` | Same content as a body fragment, if you ever choose to publish it somewhere that supplies the document skeleton |
 | `out/vendor/mermaid.min.js` | Diagram renderer for the standalone guides |
 | `out/model-ir.json` | The intermediate representation everything downstream reads |
 
@@ -88,6 +88,9 @@ The Artifact fragments never ship Mermaid, since that host renders it natively.
 
 Diagrams follow the page theme, including redrawing when the viewer switches between
 light and dark.
+
+Everything stays local. `render` only writes to `out/`, and `serve` binds loopback only —
+nothing is uploaded or published as a side effect of running the tool.
 
 ## Authentication
 

@@ -9,6 +9,16 @@ from __future__ import annotations
 import os
 import pathlib
 
+# Model for the narrative enrichment pass. Sonnet 5 by choice: enrichment is a
+# high-volume, well-constrained job (one bounded prompt per table and per measure,
+# grounded in the IR and verified afterwards), which is where Sonnet's price/latency
+# pays off. Override with SEMDOC_ENRICH_MODEL.
+DEFAULT_ENRICH_MODEL = "claude-sonnet-5"
+
+
+def enrich_model() -> str:
+    return os.environ.get("SEMDOC_ENRICH_MODEL") or DEFAULT_ENRICH_MODEL
+
 
 def load_env(path: str | pathlib.Path = ".env", *, override: bool = False) -> dict[str, str]:
     """Load `KEY=value` pairs from a .env file into os.environ.
