@@ -805,6 +805,24 @@ td.name {
   white-space: nowrap;
 }
 
+/* Facts x shared dimensions — the same data as the fact-relationship diagram, as a
+   scannable matrix instead. Marks are centered and colored so a reader can pattern-match
+   down a column (which facts share this dimension) without reading every cell. */
+.matrix-table th,
+.matrix-table td {
+  text-align: center;
+}
+
+.matrix-table th:first-child,
+.matrix-table td:first-child {
+  text-align: left;
+}
+
+.matrix-mark {
+  color: var(--ok);
+  font-weight: 600;
+}
+
 td.type,
 td.num {
   font-family: var(--font-mono);

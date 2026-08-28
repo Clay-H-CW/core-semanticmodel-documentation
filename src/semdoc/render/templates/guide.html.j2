@@ -366,6 +366,30 @@
       <div>
         <p class="section-note">Or see how the fact tables connect through shared dimensions:</p>
       </div>
+      {%- if fact_dimension_table %}
+      <div class="table-scroll">
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th>Fact table</th>
+              {%- for dim in fact_dimension_table.dims %}
+              <th>{{ dim }}</th>
+              {%- endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {%- for fact in fact_dimension_table.facts %}
+            <tr>
+              <td class="type">{{ fact }}</td>
+              {%- for dim in fact_dimension_table.dims %}
+              <td class="matrix-mark">{{ "✓" if (fact, dim) in fact_dimension_table.marks else "" }}</td>
+              {%- endfor %}
+            </tr>
+            {%- endfor %}
+          </tbody>
+        </table>
+      </div>
+      {%- endif %}
       {{ diagram(fact_relationship_map, none, none) }}
       {%- endif %}
 

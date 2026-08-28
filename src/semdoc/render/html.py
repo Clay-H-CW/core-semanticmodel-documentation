@@ -96,6 +96,27 @@ def _report_usage_indexes(reports: list[ReportUsage]) -> tuple[dict[str, list[st
     return measures, columns
 
 
+def _fact_dimension_table(model: Model) -> dict | None:
+    """Facts x shared dimensions, as plain rows/columns/marks for an HTML table.
+
+    Same underlying data as `diagrams.fact_relationship_map` (`diagrams.shared_dimension_map`
+    — one computation, two presentations) — a scannable table for "which facts touch
+    which shared dimension" reads better than a node-and-line diagram for what is
+    fundamentally a small bipartite relationship, and costs nothing to lay out wide: an
+    HTML table just flows, it isn't fighting a graph-layout algorithm for horizontal
+    space the way the diagram version is. `None` under the same condition the diagram
+    returns `None` under — fewer than two facts, or none sharing a dimension.
+    """
+    shared = diagrams.shared_dimension_map(model)
+    if not shared:
+        return None
+
+    dims = sorted(shared)
+    facts = sorted({f for reached_by in shared.values() for f in reached_by})
+    marks = {(f, d) for d, reached_by in shared.items() for f in reached_by}
+    return {"facts": facts, "dims": dims, "marks": marks}
+
+
 _SUFFIX_LABEL_OVERRIDES = {"dim": "Dimension"}
 _SUFFIX_PRIORITY = {"Fact": 0, "Dimension": 1, "Bridge": 2}
 
@@ -337,6 +358,7 @@ def _context(
         "fact_relationship_map": diagrams.fact_relationship_map(
             model, label_hidden_columns=(variant == "technical")
         ),
+        "fact_dimension_table": _fact_dimension_table(model),
         "use_per_fact_diagrams": use_per_fact_diagrams,
         "per_fact_star": per_fact_star,
         "per_fact_lineage": per_fact_lineage,

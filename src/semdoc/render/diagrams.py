@@ -242,32 +242,25 @@ def lineage_focus(ir: ModelIR, table_name: str) -> str | None:
     return warehouse_lineage(ModelIR(model=subset))
 
 
-def fact_relationship_map(model: Model, *, label_hidden_columns: bool = True) -> str | None:
-    """How the fact tables relate to each other, through the dimensions they share.
+def shared_dimension_map(model: Model) -> dict[str, set[str]]:
+    """Dimension name -> the fact tables that reach it, for dimensions reached by 2+ facts.
 
-    Checked against every real model this project has extracted: fact tables never have
-    a *direct* relationship to another fact table (0 of several hundred relationships
-    across four real models). They relate to each other through a conformed dimension
-    both connect to — so that dimension is drawn explicitly rather than inventing a
-    synthetic fact-to-fact edge, which would hide which dimension is actually doing the
-    connecting.
+    Shared by `fact_relationship_map` (the diagram) and `html._fact_dimension_table` (the
+    plain-table rendering of the identical data) — one computation, two presentations.
 
     A dimension touched by only one fact is dropped: it says something about that one
-    fact (already covered by its own per-fact diagram), nothing about how facts relate
-    to each other. This matters more than it might sound — checked live, a naive "any
-    shared dimension counts" graph is a near-complete hairball (every fact pair on
-    ServTracker turned out to share at least one dimension), because every fact
-    legitimately connects to the same handful of core dimensions (client, date,
-    provider...). Keeping only genuinely-shared dimensions is what keeps this diagram
-    small enough to be worth looking at.
+    fact (already covered by its own per-fact diagram), nothing about how facts relate to
+    each other. This matters more than it might sound — checked live, a naive "any shared
+    dimension counts" version is a near-complete hairball (every fact pair on ServTracker
+    turned out to share at least one dimension), because every fact legitimately connects
+    to the same handful of core dimensions (client, date, provider...). Keeping only
+    genuinely-shared dimensions is what keeps either presentation worth looking at.
 
-    Returns `None` when fewer than two facts exist, or none share a dimension — an
-    all-isolated-facts diagram would tell the reader nothing, same policy as
-    `measure_dependencies` when no measure builds on another.
+    Empty when fewer than two facts exist, or none share a dimension.
     """
     facts = [t for t in model.tables if t.kind is TableKind.FACT]
     if len(facts) < 2:
-        return None
+        return {}
     fact_names = {t.name for t in facts}
 
     dim_to_facts: dict[str, set[str]] = {}
@@ -278,11 +271,28 @@ def fact_relationship_map(model: Model, *, label_hidden_columns: bool = True) ->
         elif b in fact_names and a not in fact_names:
             dim_to_facts.setdefault(a, set()).add(b)
 
-    shared_dims = {d for d, reached_by in dim_to_facts.items() if len(reached_by) >= 2}
-    if not shared_dims:
+    return {d: reached_by for d, reached_by in dim_to_facts.items() if len(reached_by) >= 2}
+
+
+def fact_relationship_map(model: Model, *, label_hidden_columns: bool = True) -> str | None:
+    """How the fact tables relate to each other, through the dimensions they share.
+
+    Checked against every real model this project has extracted: fact tables never have
+    a *direct* relationship to another fact table (0 of several hundred relationships
+    across four real models). They relate to each other through a conformed dimension
+    both connect to — so that dimension is drawn explicitly rather than inventing a
+    synthetic fact-to-fact edge, which would hide which dimension is actually doing the
+    connecting.
+
+    Returns `None` when `shared_dimension_map` finds nothing — an all-isolated-facts
+    diagram would tell the reader nothing, same policy as `measure_dependencies` when no
+    measure builds on another.
+    """
+    shared = shared_dimension_map(model)
+    if not shared:
         return None
 
-    keep = fact_names | shared_dims
+    keep = {f for facts in shared.values() for f in facts} | set(shared)
     subset = Model(
         name=model.name,
         tables=[t for t in model.tables if t.name in keep],

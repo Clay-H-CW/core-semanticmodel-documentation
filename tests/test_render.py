@@ -22,7 +22,7 @@ from semdoc.ir.schema import (
     ValidationReport,
 )
 from semdoc.render import diagrams
-from semdoc.render.html import _per_fact_diagrams, _table_groups, render_guide
+from semdoc.render.html import _fact_dimension_table, _per_fact_diagrams, _table_groups, render_guide
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sample_tmsl.json"
 
@@ -175,6 +175,20 @@ def test_fact_relationship_map_includes_only_dimensions_shared_by_two_or_more_fa
     assert "Orders" in mermaid
     assert "Shipments" in mermaid
     assert "Customer" in mermaid
+
+
+def test_fact_dimension_table_none_for_a_single_fact_model(ir):
+    assert _fact_dimension_table(ir.model) is None
+
+
+def test_fact_dimension_table_matches_the_shared_dimension_map():
+    multi_ir = _multi_fact_ir()
+    table = _fact_dimension_table(multi_ir.model)
+    assert table == {
+        "facts": ["Orders", "Shipments"],
+        "dims": ["Customer"],
+        "marks": {("Orders", "Customer"), ("Shipments", "Customer")},
+    }
 
 
 # -- html ------------------------------------------------------------------------------
@@ -818,6 +832,17 @@ def test_guide_shows_the_fact_relationship_map_when_facts_share_a_dimension():
     multi_ir = _multi_fact_ir()
     html = render_guide(multi_ir, "technical")
     assert "Or see how the fact tables connect through shared dimensions" in html
+
+
+def test_guide_shows_the_fact_dimension_matrix_table_alongside_the_diagram():
+    multi_ir = _multi_fact_ir()
+    html = render_guide(multi_ir, "technical")
+    assert 'class="matrix-table"' in html
+    # Header names the shared dimension; a mark sits in both facts' rows for it.
+    table_start = html.index('class="matrix-table"')
+    table_html = html[table_start : table_start + 2000]
+    assert "<th>Customer</th>" in table_html
+    assert table_html.count('class="matrix-mark">✓') == 2
 
 
 def test_guide_omits_the_fact_relationship_map_for_a_single_fact_model(ir):
