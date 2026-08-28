@@ -484,3 +484,65 @@ def test_questions_section_does_not_overclaim_dax_execution_when_none_exists(ir)
     html = render_guide(ir_no_dax, "business")
     assert "was executed against it" not in html
     assert "checked against the model" in html
+
+
+# -- existing report usage ---------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def reports_ir(ir):
+    from semdoc.ir.schema import ReportUsage
+
+    return ir.model_copy(
+        update={
+            "reports": [
+                ReportUsage(
+                    name="Program Delivery",
+                    id="11111111-1111-1111-1111-111111111111",
+                    pages=["Overview", "Detail"],
+                    used_fields=[
+                        Ref(measure="Total Units"),
+                        Ref(table="Program", column="Program Name"),
+                    ],
+                )
+            ]
+        }
+    )
+
+
+def test_existing_reports_section_lists_the_report_and_its_fields(reports_ir):
+    html = render_guide(reports_ir, "business")
+    assert 'id="existing-reports"' in html
+    assert "Program Delivery" in html
+    assert "Overview, Detail" in html
+    assert "[Total Units]" in html
+    assert "&#39;Program&#39;[Program Name]" in html
+
+
+def test_existing_reports_section_absent_when_no_reports(ir):
+    html = render_guide(ir, "business")
+    assert 'id="existing-reports"' not in html
+    assert "Program Delivery" not in html
+
+
+def test_measure_and_column_show_report_usage_badges(reports_ir):
+    html = render_guide(reports_ir, "technical")
+    measure_start = html.index('id="measure-total-units"')
+    measure_card = html[measure_start : measure_start + 1500]
+    assert "in 1 report" in measure_card
+
+    table_start = html.index('id="table-program"')
+    table_card = html[table_start : table_start + 3000]
+    assert "in 1 report" in table_card
+
+
+def test_report_usage_badge_absent_for_unused_measure(reports_ir):
+    html = render_guide(reports_ir, "technical")
+    # "Service Count" is a real measure in the fixture that no report references. Slice
+    # only up to the next measure card's id, not a fixed length — the cards are short
+    # enough that a fixed window bleeds into a neighboring card's own badge.
+    measure_start = html.index('id="measure-service-count"')
+    next_card = html.index('id="measure-', measure_start + 1)
+    measure_card = html[measure_start:next_card]
+    assert "in 1 report" not in measure_card
+    assert "report-usage" not in measure_card

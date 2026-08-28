@@ -144,6 +144,26 @@ Nothing is published anywhere as a side effect of running the tool. `render` wri
 to `out/`, and `serve` binds loopback only. Generated guides will contain real table names,
 measure DAX, and RLS filter expressions, so publishing is an explicit, separate act.
 
+### D8: Report usage — legacy `report.json` only, verified live
+
+`semdoc reports extract` reads which fields/measures existing Power BI reports actually
+use, straight from each report's own definition (`getDefinition` on the Report item,
+same LRO pattern as the model). Two formats exist for a report's definition: the newer
+split `definition/pages/.../visual.json` layout, and the older single `report.json` file
+with each visual's config JSON-encoded as a string inside it.
+
+Only the legacy format is parsed. Checked live against this project's actual target
+tenant: every real report there is stored in the legacy format, and asking the API to
+convert one via `getDefinition?format=PBIR` fails outright ("Report is using format
+'[CurrentFormat]' and cannot be converted... using the API"). A report in the split
+format is skipped with a clear reason rather than guessed at from documentation alone —
+this project has never seen one to verify a parser against, and the DateTime-cardinality
+bug earlier in this project is exactly the cost of shipping an unverified assumption.
+
+Field references are resolved back against the current model and dropped (not guessed
+at) when they no longer match — the same "missing means not extracted" policy as
+`WarehouseTable.reads_from`.
+
 ## Extraction extras worth grabbing
 
 - **Existing descriptions.** Many models already have some. These are ground truth: the

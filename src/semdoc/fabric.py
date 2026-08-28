@@ -177,6 +177,18 @@ class FabricClient:
 
         return (server, display_name) if server else None
 
+    def list_reports(self, workspace_id: str) -> list[dict]:
+        """List Power BI reports in a workspace via the classic Power BI REST API.
+
+        Unlike the Fabric items endpoint, this includes `datasetId` directly on each
+        row — exactly what is needed to filter down to reports built on one specific
+        semantic model without pulling every report's full definition first.
+        """
+        resp = self._request(
+            "GET", f"{POWERBI_API}/groups/{workspace_id}/reports", scope=POWERBI_SCOPE
+        )
+        return resp.json().get("value", [])
+
     def find_semantic_model(self, workspace_id: str, name: str) -> dict:
         models = self.list_semantic_models(workspace_id)
         lowered = name.casefold()
@@ -223,6 +235,28 @@ class FabricClient:
             if path.casefold().endswith(".bim"):
                 return json.loads(text)
         raise FabricError(f"No .bim part in definition. Got parts: {list(parts)}")
+
+    def get_report_definition(self, workspace_id: str, report_id: str) -> dict[str, str]:
+        """Return a report's definition parts as {path: decoded text}.
+
+        Binary parts (registered images, mostly) are skipped rather than base64-decoded
+        into garbage — `semdoc.reports` only ever needs `report.json` (legacy single-file
+        format) or, for a report saved in the newer split format, the files under
+        `definition/`. Both are plain UTF-8 JSON; a resource image is not.
+        """
+        url = f"{FABRIC_API}/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
+        payload = self._await_lro(self._request("POST", url))
+
+        parts: dict[str, str] = {}
+        for part in payload.get("definition", {}).get("parts", []):
+            if part.get("payloadType") != "InlineBase64":
+                continue
+            raw = base64.b64decode(part.get("payload", ""))
+            try:
+                parts[part.get("path", "")] = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        return parts
 
     def execute_dax(self, workspace_id: str, dataset_id: str, dax: str) -> list[dict]:
         """Run one DAX query and return its rows.

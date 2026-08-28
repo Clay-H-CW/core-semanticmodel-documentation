@@ -20,7 +20,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 from markupsafe import Markup
 
 from semdoc import __version__
-from semdoc.ir.schema import Measure, ModelIR, Table, TableKind
+from semdoc.ir.schema import Measure, Model, ModelIR, ReportUsage, Table, TableKind
 from semdoc.render import assets, diagrams
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -74,6 +74,25 @@ def _bpa_by_category(model: Model) -> list[tuple[str, list]]:
         findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), f.rule_id, f.object_name))
 
     return [(category, groups[category]) for category in sorted(groups)]
+
+
+def _report_usage_indexes(reports: list[ReportUsage]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Reverse-index existing-report usage for template lookups.
+
+    Two separate dicts, rather than one keyed by `Ref.__str__`, because the template
+    looks measures up by name alone and columns up by (table, column) — building the
+    exact lookup keys here keeps the template from having to reconstruct `Ref`'s string
+    format itself.
+    """
+    measures: dict[str, list[str]] = {}
+    columns: dict[str, list[str]] = {}
+    for report in reports:
+        for ref in report.used_fields:
+            if ref.measure:
+                measures.setdefault(ref.measure, []).append(report.name)
+            elif ref.table and ref.column:
+                columns.setdefault(f"{ref.table}.{ref.column}", []).append(report.name)
+    return measures, columns
 
 
 def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
@@ -171,6 +190,7 @@ def _context(
         verification_state = "fail"
 
     pinned_tables, table_groups = _table_groups(visible_tables)
+    measure_report_usage, column_report_usage = _report_usage_indexes(ir.reports)
 
     return {
         "model": model,
@@ -194,6 +214,9 @@ def _context(
             ir.narrative and any(q.dax for q in ir.narrative.questions_answered)
         ),
         "bpa_by_category": _bpa_by_category(model),
+        "existing_reports": ir.reports,
+        "measure_report_usage": measure_report_usage,
+        "column_report_usage": column_report_usage,
         "disconnected_tables": [
             t for t in visible_tables if t.kind is TableKind.DISCONNECTED
         ],

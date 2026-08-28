@@ -133,6 +133,9 @@
       {%- if narrative and narrative.gotchas %}
       <a href="#gotchas">Watch out for<span class="nav-count">{{ narrative.gotchas|length }}</span></a>
       {%- endif %}
+      {%- if existing_reports %}
+      <a href="#existing-reports">Existing reports<span class="nav-count">{{ existing_reports|length }}</span></a>
+      {%- endif %}
     </div>
 
     <div class="nav-group" data-nav-section="measures">
@@ -416,6 +419,10 @@
           {%- if not measure.depends_on|selectattr("measure")|list %}
           <span class="chip">base</span>
           {%- endif %}
+          {%- set used_in = measure_report_usage.get(measure.name) %}
+          {%- if used_in %}
+          <span class="chip report-usage" title="Used in: {{ used_in|join(', ') }}">in {{ used_in|length }} report{{ "s" if used_in|length != 1 }}</span>
+          {%- endif %}
           <span class="spacer"></span>
           {%- if measure.description %}{{ provenance("model") }}{% endif %}
         </div>
@@ -527,6 +534,8 @@
                     {{ col.name }}
                     {%- if col.is_hidden %} <span class="chip hidden-flag">hidden</span>{% endif %}
                     {%- if col.is_key %} <span class="chip">key</span>{% endif %}
+                    {%- set used_in = column_report_usage.get(table.name ~ "." ~ col.name) %}
+                    {%- if used_in %} <span class="chip report-usage" title="Used in: {{ used_in|join(', ') }}">in {{ used_in|length }} report{{ "s" if used_in|length != 1 }}</span>{% endif %}
                   </td>
                   {%- if has_stats %}
                   <td class="values">{{ cardinality_badge(col) }}</td>
@@ -587,6 +596,39 @@
             <li>{{ step }}</li>
             {%- endfor %}
           </ol>
+          {%- endif %}
+        </div>
+      </div>
+      {%- endfor %}
+    </section>
+    {%- endif %}
+
+    {%- if existing_reports %}
+    <section id="existing-reports">
+      <div>
+        <p class="eyebrow">Already built</p>
+        <h2 class="section-title">Existing reports</h2>
+        <p class="section-note">
+          Reports already built on this model, and the fields and measures each one
+          actually uses — read from the report's own definition, not guessed. One of
+          these doing something close to what you need is a faster start than building
+          from scratch.
+        </p>
+      </div>
+      {%- for report in existing_reports %}
+      <div class="card">
+        <div class="card-header">
+          <h3 class="entry-title">{{ report.name }}</h3>
+          <span class="chip">{{ report.pages|length }} page{{ "s" if report.pages|length != 1 }}</span>
+        </div>
+        <div class="card-body">
+          {%- if report.pages %}
+          <p class="section-note">Pages: {{ report.pages|join(", ") }}</p>
+          {%- endif %}
+          {%- if report.used_fields %}
+          {{ ref_chips(report.used_fields) }}
+          {%- else %}
+          <p class="section-note"><em>No field references could be resolved for this report.</em></p>
           {%- endif %}
         </div>
       </div>

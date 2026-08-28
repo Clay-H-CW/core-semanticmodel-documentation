@@ -9,6 +9,7 @@
     semdoc warehouse extract              schema, view SQL, and best-effort lineage for
                                            warehouse objects the model reads from
     semdoc stats extract                  column cardinality and sample values via live DAX
+    semdoc reports extract                which fields/measures existing Power BI reports use
     semdoc serve                          serve guides locally, with the chat widget if
                                            ANTHROPIC_API_KEY is set
 
@@ -252,6 +253,38 @@ def cmd_stats_extract(args: argparse.Namespace) -> int:
 
     _write_ir(ir, ir_path)
     print(f"Column stats attached -> {ir_path}")
+    return 0
+
+
+def cmd_reports_extract(args: argparse.Namespace) -> int:
+    """Find every Power BI report built on this model and what it actually uses."""
+    from semdoc import reports as reports_module
+
+    out_dir = pathlib.Path(args.out)
+    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    ir = _load_ir(ir_path)
+
+    try:
+        with FabricClient(credential_from_env()) as client:
+            found, notes = reports_module.extract_report_usage(ir.model, client)
+    except reports_module.ReportsError as exc:
+        print(f"Report usage extraction failed: {exc}", file=sys.stderr)
+        return 6
+
+    total_fields = sum(len(r.used_fields) for r in found)
+    print(
+        f"  {len(found)} report(s) found on this model, {total_fields} field/measure "
+        f"reference(s) resolved",
+        file=sys.stderr,
+    )
+    for r in found:
+        print(f"    {r.name}: {len(r.pages)} page(s), {len(r.used_fields)} field(s)/measure(s)", file=sys.stderr)
+    for note in notes:
+        print(f"    NOTE: {note}", file=sys.stderr)
+
+    ir.reports = found
+    _write_ir(ir, ir_path)
+    print(f"Report usage attached -> {ir_path}")
     return 0
 
 
@@ -520,6 +553,14 @@ def build_parser() -> argparse.ArgumentParser:
         "Cardinality is still recorded either way.",
     )
     p_stats_extract.set_defaults(func=cmd_stats_extract)
+
+    p_reports = sub.add_parser("reports", help="Look up which existing reports use this model.")
+    reports_sub = p_reports.add_subparsers(dest="reports_command", required=True)
+    p_reports_extract = reports_sub.add_parser(
+        "extract", help="Find every report built on this model and what it actually uses."
+    )
+    p_reports_extract.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_reports_extract.set_defaults(func=cmd_reports_extract)
 
     p_generate = sub.add_parser("generate", help="Extract and render in one pass.")
     add_target(p_generate)

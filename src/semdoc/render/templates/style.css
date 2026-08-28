@@ -587,6 +587,12 @@ td.values {
   letter-spacing: normal;
 }
 
+.chip.report-usage {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .chip.bpa-info {
   color: var(--text-muted);
 }

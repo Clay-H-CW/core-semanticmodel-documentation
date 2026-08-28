@@ -295,6 +295,23 @@ class Warehouse(IRBase):
     tables: list[WarehouseTable] = Field(default_factory=list)
 
 
+class ReportUsage(IRBase):
+    """What one existing Power BI report actually uses from this model.
+
+    Extracted fact, not narrative — parsed straight out of the report's own definition
+    (visual field wells and filters), the same verbatim-and-best-effort spirit as
+    `WarehouseTable.reads_from`: a field that isn't referenced anywhere the parser looked
+    is simply absent from `used_fields`, never guessed at. Lets a report author find an
+    existing report that already answers a similar question, and lets everyone else see
+    which fields and measures are actually load-bearing rather than just reachable.
+    """
+
+    name: str
+    id: str
+    pages: list[str] = Field(default_factory=list)
+    used_fields: list[Ref] = Field(default_factory=list)
+
+
 # --------------------------------------------------------------------------------------
 # LLM-authored narrative
 # --------------------------------------------------------------------------------------
@@ -387,5 +404,6 @@ class ModelIR(IRBase):
 
     model: Model
     warehouse: Warehouse | None = None
+    reports: list[ReportUsage] = Field(default_factory=list)
     narrative: Narrative | None = None
     validation: ValidationReport | None = None
