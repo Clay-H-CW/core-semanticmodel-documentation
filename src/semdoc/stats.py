@@ -13,7 +13,14 @@ are only fetched for columns under a cardinality threshold — fetching three ex
 of 40,000 distinct values is not useful anyway, so there is no reason to pay for it.
 
 Scoped to visible columns of visible, non-calculation-group tables — a report author
-never sees anything else, so profiling it would just be wasted queries.
+never sees anything else, so profiling it would just be wasted queries. DateTime columns
+are excluded outright, found the hard way against a real warehouse: DISTINCTCOUNT itself
+— not just formatting a value for a sample string — can fail server-side on a single
+corrupt or out-of-range date already sitting in the data (outside the
+1899-12-30..9999-12-31 range Analysis Services transports), and it fails the *entire*
+query, not just that column. This is also the right scope on its own terms: cardinality
+is not a meaningful "good slicer" signal for a continuous date column anyway — a range
+slicer is the correct control there, not a value list.
 """
 
 from __future__ import annotations
@@ -37,12 +44,16 @@ class StatsError(RuntimeError):
 
 
 def profilable_columns(model: Model) -> list[tuple[Table, list[Column]]]:
-    """(table, columns) pairs for every visible column a report author can actually see."""
+    """(table, columns) pairs for every visible, non-DateTime column a report author can
+    actually see. See the module docstring for why DateTime is excluded outright rather
+    than merely handled carefully."""
     out = []
     for table in model.tables:
         if table.is_hidden or table.kind is TableKind.CALCULATION_GROUP:
             continue
-        columns = [c for c in table.columns if not c.is_hidden]
+        columns = [
+            c for c in table.columns if not c.is_hidden and c.data_type.casefold() != "datetime"
+        ]
         if columns:
             out.append((table, columns))
     return out
@@ -63,17 +74,12 @@ def _chunk(items: list, size: int) -> list[list]:
 
 
 def _build_query(table_name: str, columns: list[Column], sample_threshold: int) -> str:
-    """One EVALUATE ROW(...) computing cardinality (and, below the threshold, a sample
-    string) for every column in this chunk. A VAR per column means DISTINCTCOUNT is
+    """One EVALUATE ROW(...) computing cardinality and, below the threshold, a sample
+    string, for every column in this chunk. A VAR per column means DISTINCTCOUNT is
     computed once and reused for both the cardinality value and the sample-size gate.
 
-    Sample values are skipped entirely for DateTime columns. Found the hard way against a
-    real warehouse: CONCATENATEX has to convert every distinct value to text to build the
-    sample string, and a single corrupt/sentinel date outside 1899-12-30..9999-12-31 (the
-    transport range executeQueries serializes through) fails the *entire* query — not just
-    that column. DISTINCTCOUNT never formats a value, so cardinality is unaffected. Sample
-    dates are not a useful "good slicer" signal anyway (a range slicer is the right control
-    for a date column, not a value list), so there is nothing lost by skipping them.
+    Callers are expected to have already excluded DateTime columns (see
+    `profilable_columns`) — this function does not special-case them.
     """
     var_lines = []
     row_args = []
@@ -83,14 +89,12 @@ def _build_query(table_name: str, columns: list[Column], sample_threshold: int) 
         var_lines.append(f"VAR {var_name} = DISTINCTCOUNT({ref})")
 
         card_key = _dax_string_literal(f"{col.name}__card")
+        sample_key = _dax_string_literal(f"{col.name}__sample")
         row_args.append(f"{card_key}, {var_name}")
-
-        if col.data_type.casefold() != "datetime":
-            sample_key = _dax_string_literal(f"{col.name}__sample")
-            row_args.append(
-                f"{sample_key}, IF({var_name} <= {sample_threshold}, "
-                f'CONCATENATEX(VALUES({ref}), {ref}, "{_SAMPLE_DELIMITER}"))'
-            )
+        row_args.append(
+            f"{sample_key}, IF({var_name} <= {sample_threshold}, "
+            f'CONCATENATEX(VALUES({ref}), {ref}, "{_SAMPLE_DELIMITER}"))'
+        )
 
     body = ",\n    ".join(row_args)
     return "EVALUATE\n" + "\n".join(var_lines) + f"\nRETURN\nROW(\n    {body}\n)"

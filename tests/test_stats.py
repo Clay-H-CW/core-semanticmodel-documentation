@@ -78,17 +78,24 @@ def test_build_query_uses_the_given_sample_threshold():
     assert "__c0 <= 7" in query
 
 
-def test_build_query_skips_sample_fetch_for_datetime_columns():
-    # Found against a real warehouse: CONCATENATEX has to convert every distinct value to
-    # text, and a single out-of-range/corrupt date fails the *entire* query, not just
-    # that column. DISTINCTCOUNT never formats a value, so cardinality is unaffected.
-    cols = [Column(name="EntryDate", data_type="dateTime"), Column(name="County", data_type="string")]
-    query = _build_query("T", cols, sample_threshold=50)
-    assert "EntryDate__card" in query
-    assert "EntryDate__sample" not in query
-    assert "County__card" in query
-    assert "County__sample" in query
-    assert "CONCATENATEX(VALUES('T'[EntryDate])" not in query
+def test_profilable_columns_excludes_datetime_columns():
+    # Found against a real warehouse: DISTINCTCOUNT itself - not just formatting a value
+    # for a sample string - can fail server-side on a single corrupt/out-of-range date
+    # already sitting in the data, and it fails the *entire* query, not just that column.
+    # DateTime columns are excluded before a query is ever built, not handled inside one.
+    table = Table(
+        name="T",
+        columns=[Column(name="EntryDate", data_type="dateTime"), Column(name="County", data_type="string")],
+    )
+    model = Model(name="M", tables=[table])
+    [(_, columns)] = profilable_columns(model)
+    assert [c.name for c in columns] == ["County"]
+
+
+def test_profilable_columns_datetime_check_is_case_insensitive():
+    table = Table(name="T", columns=[Column(name="A", data_type="DateTime")])
+    model = Model(name="M", tables=[table])
+    assert profilable_columns(model) == []
 
 
 # -- result parsing --------------------------------------------------------------------
