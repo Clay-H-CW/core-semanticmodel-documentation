@@ -64,6 +64,31 @@ semdoc serve --variant business --port 8080
 `extract` and `render` are separate so templates and prompts can be iterated offline
 against a stored IR. Add `--save-tmsl` to keep the raw `model.bim` for use as a fixture.
 
+### Optional passes
+
+Each of these augments the stored IR in place; run `semdoc render` again afterwards to
+pick up the result. All are safe to skip — the guide degrades gracefully without them.
+
+```powershell
+# Attach narrative content (hand-authored or session-authored JSON matching the
+# Narrative schema), after checking every identifier it mentions against the model
+semdoc narrative apply out/narrative.json
+
+# Warehouse schema, view SQL, and best-effort lineage for objects the model reads from
+semdoc warehouse extract
+
+# Column cardinality and sample values via live DAX ("is this a good filter?")
+semdoc stats extract --sample-threshold 50
+
+# Which existing Power BI reports use this model, and which fields/measures each uses
+semdoc reports extract
+```
+
+`narrative apply` is what gives narrative content its "verified" badge — everything else
+above (warehouse lineage, column stats, report usage) is extracted fact, computed
+straight from the model/warehouse/reports and never LLM-authored, so it carries no such
+badge in the first place.
+
 ## Output
 
 | File | Audience |
@@ -111,19 +136,36 @@ table, a calculated table, a marked date table, and an RLS role.
 
 ## Status
 
-Built and tested:
+Built, tested, and run against a real model (a live Fabric DirectLake workspace, not
+just the fixture):
 
-- [x] Pure-HTTP Fabric extraction (TMSL + DAX)
+- [x] Pure-HTTP Fabric extraction (TMSL + DAX), both Import and DirectLake storage modes
 - [x] IR schema, with extracted facts and narrative kept separate
 - [x] Deterministic table classification, measure dependency graph, warehouse lineage
 - [x] Mermaid diagrams: star schema (drawn as filter flow), lineage, measure dependencies
-- [x] Two-audience HTML guides
+- [x] Two-audience HTML guides (technical / business), with a chat widget in `serve`
+      when `ANTHROPIC_API_KEY` is set
 - [x] CLI
+- [x] Narrative identifier validation (`narrative apply` — every identifier a narrative
+      mentions is checked against the model before the guide calls it "verified")
+- [x] Warehouse schema, view SQL, and best-effort FROM/JOIN lineage (`warehouse extract`)
+- [x] Column cardinality and sample values via live DAX (`stats extract`)
+- [x] Best Practice Analyzer findings — 21 of the 30 community Tabular Editor rules
+- [x] Existing-report usage: which fields/measures each Power BI report on the model
+      actually uses (`reports extract`), for the legacy single-file report format
 
-Next:
+Not yet built:
 
-- [ ] Enrichment pass (Claude API, grounded strictly in the IR)
-- [ ] Validation pass (identifier resolution + live DAX execution)
-- [ ] Warehouse schema pass over the SQL analytics endpoint
-- [ ] Column cardinality and row counts via `INFO.*` DAX
-- [ ] Run against a real model
+- [ ] An automated narrative-generation pass. Today, narrative content is authored
+      outside the tool (by hand, or by a session working from the IR) and only
+      validated/attached by `narrative apply` — there is no `semdoc enrich` that calls
+      Claude directly to draft it.
+- [ ] Automated DAX-snippet execution validation. `AnsweredQuestion.dax_verified` exists
+      in the schema, but nothing currently runs a narrative's DAX and sets it
+      automatically — whoever authors the narrative sets it by hand today.
+- [ ] Report usage for the newer split `definition/pages/.../visual.json` report format
+      (only the legacy single-file `report.json` format is parsed — see `docs/design.md`
+      D8 for why).
+- [ ] Row counts / table-size profiling (explicit cost decision, not an oversight).
+- [ ] Service principal auth is implemented but has not been exercised against a live
+      tenant — only interactive sign-in has been used so far.
