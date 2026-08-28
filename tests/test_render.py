@@ -253,10 +253,18 @@ def test_disconnected_table_is_called_out(ir):
     assert "no relationships to anything else" in html
 
 
-def test_table_groups_pins_tables_that_host_their_own_measures():
-    from semdoc.ir.schema import Measure, Table
+def test_table_groups_pins_a_disconnected_measures_container():
+    # The real HMIS shape: *HMIS_Measures hosts 199 measures, one placeholder column,
+    # and zero relationships — kind is DISCONNECTED precisely because it joins to
+    # nothing. That combination, not merely "has measures," is what makes it a pure
+    # measures container worth pulling out above the groups.
+    from semdoc.ir.schema import Measure, Table, TableKind
 
-    measures_home = Table(name="*HMIS_Measures", measures=[Measure(name="M1", expression="1")])
+    measures_home = Table(
+        name="*HMIS_Measures",
+        kind=TableKind.DISCONNECTED,
+        measures=[Measure(name="M1", expression="1")],
+    )
     prefixed_a = Table(name="hmis Affiliation")
     prefixed_b = Table(name="hmis Enrollment")
     no_prefix = Table(name="AgeAsOfLookup")
@@ -268,6 +276,29 @@ def test_table_groups_pins_tables_that_host_their_own_measures():
         "General": [no_prefix],
         "hmis": [prefixed_a, prefixed_b],
     }
+
+
+def test_table_groups_keeps_a_real_fact_table_grouped_even_with_its_own_measures():
+    # Found live against real data: CaseWorthy Enterprise and Coordinate Semantic Model
+    # each put a handful of measures directly on the fact table they belong to (a real,
+    # common modeling pattern, unlike HMIS's single dedicated measures container) — e.g.
+    # Coordinate's real C8_Plan_Fact hosts 6 measures and 17 real columns, with kind
+    # FACT, not DISCONNECTED. It must still land in the "Fact" group, not be pulled out
+    # as if it were a measures-only container.
+    from semdoc.ir.schema import Column, Measure, Table, TableKind
+
+    plan_fact = Table(
+        name="C8_Plan_Fact",
+        kind=TableKind.FACT,
+        columns=[Column(name="Plan_Id"), Column(name="Client_Id")],
+        measures=[Measure(name="Count_Of_Active_Plans", expression="1")],
+    )
+    client_dim = Table(name="C8_Client_Dim", kind=TableKind.DIMENSION, columns=[Column(name="Client_Id")])
+
+    pinned, groups = _table_groups([plan_fact, client_dim])
+
+    assert pinned == []
+    assert dict(groups) == {"Fact": [plan_fact], "Dimension": [client_dim]}
 
 
 def test_table_groups_orders_general_before_named_prefixes():
@@ -354,19 +385,25 @@ def test_table_groups_bare_words_with_no_underscore_are_not_suffix_matches():
     assert dict(groups) == {"General": tables}
 
 
-def test_sidebar_pins_measure_hosting_table_and_groups_the_rest_by_prefix(ir):
-    # Fixture tables: Service Fact carries its own measures -> pinned. Client, Program,
-    # Date, and Targets have no space in their names -> all fall into "General".
+def test_sidebar_groups_a_real_fact_tables_own_measures_normally(ir):
+    # Fixture's "Service Fact" is a real fact table (6 columns, wired into
+    # relationships) that also hosts its own measures — the common pattern, not a
+    # dedicated measures-only container — so it must NOT be pinned; it groups like any
+    # other table. The fixture doesn't use the underscore-suffix convention, so it falls
+    # to the prefix-before-first-space rule and lands in its own "Service" folder.
+    # Client, Program, Date, and Targets have no space in their names -> "General".
     html = render_guide(ir, "technical")
 
-    pinned_link = '<a href="#table-service-fact" data-nav-item="service fact">'
+    service_link = '<a href="#table-service-fact" data-nav-item="service fact">'
     general_summary = html.index('<span class="nav-folder-label">General</span>')
+    service_summary = html.index('<span class="nav-folder-label">Service</span>')
 
-    assert pinned_link in html
-    # The pinned link must appear before the General folder, and outside any <details>.
-    assert html.index(pinned_link) < general_summary
-    assert 'href="#table-client"' in html[general_summary:]
-    assert 'href="#table-targets"' in html[general_summary:]
+    assert service_link in html
+    # General sorts before named-prefix folders like Service; the link itself sits
+    # after its own folder's summary, not pinned above everything.
+    assert general_summary < service_summary < html.index(service_link)
+    assert 'href="#table-client"' in html[general_summary:service_summary]
+    assert 'href="#table-targets"' in html[general_summary:service_summary]
 
 
 def test_sidebar_groups_measures_by_display_folder(ir):

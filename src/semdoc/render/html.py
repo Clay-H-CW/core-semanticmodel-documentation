@@ -133,14 +133,23 @@ def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, lis
     handful of one-table suffix groups, or vice versa — worse than either convention
     applied consistently.
 
-    A table that itself carries measures is pulled out and pinned above the groups
-    instead of being alphabetized into one: it is architecturally a different kind of
-    thing from a plain data table — typically a hidden container a modeler adds purely so
-    calculated measures have somewhere to live — and deserves its own top-level slot
-    regardless of what its name happens to start or end with.
+    A table that hosts measures *and* sits disconnected from the relationship graph
+    (`kind is DISCONNECTED`) is pulled out and pinned above the groups instead of being
+    grouped with the rest: that combination is what a modeler's dedicated, otherwise-
+    empty measures container actually looks like (HMIS's `*HMIS_Measures` — 199 measures,
+    one placeholder column, zero relationships), and it deserves its own top-level slot
+    regardless of what its name happens to start or end with. Measures on a real fact or
+    dimension table — the far more common pattern, seen in every one of this project's
+    other real models, where a table hosts a handful of measures alongside dozens of its
+    own real columns — stay with that table and get grouped normally; `_classify_tables`
+    already gives every real table a relationship-derived kind (never a bare "has
+    measures" guess would tell fact/dimension/bridge apart from a true measures home).
     """
-    pinned = [t for t in tables if t.measures]
-    rest = [t for t in tables if not t.measures]
+    def is_measures_container(t: Table) -> bool:
+        return bool(t.measures) and t.kind is TableKind.DISCONNECTED
+
+    pinned = [t for t in tables if is_measures_container(t)]
+    rest = [t for t in tables if not is_measures_container(t)]
 
     uses_suffix_convention = bool(rest) and sum(1 for t in rest if "_" in t.name) > len(rest) / 2
 
