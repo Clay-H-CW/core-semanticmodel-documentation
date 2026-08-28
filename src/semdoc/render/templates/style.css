@@ -879,8 +879,42 @@ pre code {
   border-radius: 8px;
   background: var(--surface);
   padding: 1rem;
-  overflow-x: auto;
   box-shadow: var(--shadow);
+}
+
+/* The pannable window. Fixed-height and clipping only once a diagram has actually
+   rendered and gone interactive (see .diagram-interactive below) — the plain-text
+   fallback when Mermaid never loads needs its natural height and normal overflow, not a
+   cropped box with nothing to scroll it. */
+.diagram-viewport {
+  position: relative;
+  border-radius: 6px;
+  /* Fallback default: a plain-text diagram source, same as the old .diagram behavior —
+     scrollable, not clipped, since there is no JS pan/zoom to navigate it with. */
+  overflow-x: auto;
+}
+
+.diagram-viewport.diagram-interactive {
+  height: min(62vh, 600px);
+  min-height: 260px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  cursor: grab;
+  touch-action: none;
+}
+
+.diagram-viewport.diagram-interactive.dragging {
+  cursor: grabbing;
+}
+
+.diagram-canvas {
+  transform-origin: 0 0;
+}
+
+.diagram-interactive .diagram-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 .diagram pre.mermaid {
@@ -889,6 +923,44 @@ pre code {
   padding: 0;
   text-align: center;
 }
+
+/* Hidden until the diagram actually goes interactive — no controls to show for the
+   plain-text fallback when Mermaid is missing or fails, and `.diagram-ready` is only
+   ever added by the same script that just confirmed a real SVG rendered. */
+.diagram-controls {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
+}
+
+.diagram.diagram-ready .diagram-controls {
+  display: flex;
+}
+
+.diagram-hint {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-faint);
+}
+
+.diagram-reset {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.diagram-reset:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
 
 /* Diagram typography lives here rather than in Mermaid's themeVariables — see the note in
    the init script. Labels render as foreignObject HTML, so these rules also drive the

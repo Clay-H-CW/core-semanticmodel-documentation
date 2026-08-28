@@ -80,9 +80,22 @@
   {%- endif -%}
 {%- endmacro -%}
 
+{#- The viewport/canvas split is what makes panning and zooming possible: `.diagram-canvas`
+    is the element the init script transforms (translate + scale), `.diagram-viewport` is
+    the fixed-size window that clips it. Mermaid only ever touches the <pre> inside the
+    canvas, so the canvas node itself — and any pan/zoom state attached to it — survives a
+    theme-change redraw untouched. -#}
 {%- macro diagram(source, caption, legend) -%}
   <div class="diagram">
-    <pre class="mermaid">{{ source }}</pre>
+    <div class="diagram-viewport">
+      <div class="diagram-canvas">
+        <pre class="mermaid">{{ source }}</pre>
+      </div>
+    </div>
+    <div class="diagram-controls">
+      <span class="diagram-hint">Drag to pan &middot; scroll to zoom</span>
+      <button type="button" class="diagram-reset">Reset view</button>
+    </div>
     {%- if legend %}
     <div class="diagram-legend">{{ legend|safe }}</div>
     {%- endif %}
@@ -883,6 +896,95 @@
     };
   }
 
+  // Pans (drag) and zooms (wheel) one rendered diagram. Attached once per diagram, not
+  // once per draw() call: `canvas` is never touched by Mermaid (only the <pre> inside it
+  // is), so its pan/zoom state and listeners survive a theme-change redraw untouched —
+  // `dataset.panZoomBound` just guards against binding twice on the *same* canvas.
+  function enablePanZoom(canvas) {
+    if (canvas.dataset.panZoomBound) return;
+    var viewport = canvas.parentElement;
+    var diagramEl = viewport.closest(".diagram");
+    var svg = canvas.querySelector("svg");
+    // Nothing to pan/zoom for the unrendered-source fallback, or if there is no SVG yet.
+    if (!diagramEl || diagramEl.classList.contains("diagram-unrendered") || !svg) return;
+
+    canvas.dataset.panZoomBound = "1";
+    viewport.classList.add("diagram-interactive");
+    diagramEl.classList.add("diagram-ready");
+
+    // "Home" is a fit-to-viewport view, not a bare scale-1 top-left corner — for a
+    // 50-plus-table model the diagram is far wider and taller than the viewport, and
+    // opening on an arbitrary cropped corner of it is a worse first look than a zoomed-
+    // out overview the reader can then dig into. Measured before any transform is
+    // applied, so this is the SVG's true natural size.
+    var svgRect = svg.getBoundingClientRect();
+    var vpRect = viewport.getBoundingClientRect();
+    var homeScale = Math.min(vpRect.width / svgRect.width, vpRect.height / svgRect.height, 1) || 1;
+    var homeTx = (vpRect.width - svgRect.width * homeScale) / 2;
+    var homeTy = (vpRect.height - svgRect.height * homeScale) / 2;
+
+    var scale = homeScale, tx = homeTx, ty = homeTy;
+    var dragging = false, startX = 0, startY = 0, startTx = 0, startTy = 0;
+    var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function apply(withTransition) {
+      canvas.style.transition = withTransition && !reduceMotion ? "transform 0.2s ease" : "none";
+      canvas.style.transform = "translate(" + tx + "px, " + ty + "px) scale(" + scale + ")";
+    }
+    apply(false);
+
+    viewport.addEventListener("mousedown", function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startTx = tx;
+      startTy = ty;
+      viewport.classList.add("dragging");
+    });
+    window.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      tx = startTx + (e.clientX - startX);
+      ty = startTy + (e.clientY - startY);
+      apply(false);
+    });
+    window.addEventListener("mouseup", function () {
+      if (!dragging) return;
+      dragging = false;
+      viewport.classList.remove("dragging");
+    });
+
+    viewport.addEventListener(
+      "wheel",
+      function (e) {
+        e.preventDefault();
+        var rect = viewport.getBoundingClientRect();
+        var offsetX = e.clientX - rect.left;
+        var offsetY = e.clientY - rect.top;
+        var factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+        var next = Math.min(4, Math.max(homeScale * 0.5, scale * factor));
+        // Keep the point under the cursor fixed while the scale changes, instead of
+        // zooming toward the top-left corner.
+        tx = offsetX - ((offsetX - tx) / scale) * next;
+        ty = offsetY - ((offsetY - ty) / scale) * next;
+        scale = next;
+        apply(false);
+      },
+      { passive: false }
+    );
+
+    var reset = diagramEl.querySelector(".diagram-reset");
+    if (reset) {
+      reset.addEventListener("click", function () {
+        scale = homeScale;
+        tx = homeTx;
+        ty = homeTy;
+        apply(true);
+      });
+    }
+  }
+
   var drawing = false;
 
   function draw() {
@@ -899,7 +1001,11 @@
       securityLevel: "strict",
       theme: "base",
       themeVariables: themeVariables(),
-      flowchart: { useMaxWidth: true, curve: "basis", padding: 12 }
+      // useMaxWidth was squeezing every diagram down to the container's width, which is
+      // what actually made a 50-plus-table model unreadable — not the layout direction.
+      // Rendering at natural size and letting the pan/zoom viewport below handle
+      // navigation is what "spread out and explorable" needs instead.
+      flowchart: { useMaxWidth: false, curve: "basis", padding: 12, nodeSpacing: 45, rankSpacing: 100 }
     });
 
     Promise.resolve(mermaid.run({ nodes: blocks }))
@@ -908,7 +1014,10 @@
           d.classList.add("diagram-unrendered");
         });
       })
-      .then(function () { drawing = false; });
+      .then(function () {
+        drawing = false;
+        document.querySelectorAll(".diagram-canvas").forEach(enablePanZoom);
+      });
   }
 
   draw();
