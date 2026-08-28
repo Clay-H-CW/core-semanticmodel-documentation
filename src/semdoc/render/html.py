@@ -96,28 +96,50 @@ def _report_usage_indexes(reports: list[ReportUsage]) -> tuple[dict[str, list[st
     return measures, columns
 
 
-def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
-    """Split tables into pinned (measure-hosting) and name-prefix groups, for the sidebar.
+_STRUCTURAL_SUFFIX = re.compile(r"(?:^|[_ ])(fact|dim|bridge)$", re.IGNORECASE)
+_STRUCTURAL_LABEL = {"fact": "Fact", "dim": "Dimension", "bridge": "Bridge"}
+_STRUCTURAL_ORDER = {"Fact": 0, "Dimension": 1, "Bridge": 2}
 
-    Tables have no `display_folder` the way measures do, but a naming convention like
-    "hmis Enrollment" / "hmis Exit" is common — this groups by the token before the first
-    space, falling back to "General" for a name with no such prefix (e.g. "AgeAsOfLookup").
+
+def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
+    """Split tables into pinned (measure-hosting) and grouped tables, for the sidebar.
+
+    A table whose name ends in `_Fact`/`_Dim`/`_Bridge` (or `Fact`/`Dim`/`Bridge` on its
+    own) is grouped by that structural role first — a warehouse-star-schema naming
+    convention this project has seen used consistently across several real models, and
+    the single most useful grouping for a report author once it's there: it says "slice
+    by this" vs. "measure this" before they've read a single description. Anything that
+    doesn't match falls back to the token before the table's first space (a different
+    real convention, e.g. "hmis Enrollment" / "hmis Exit"), or "General" for a name with
+    neither. The two schemes never fight each other: a model uses one or the other in
+    practice, never a mix, since a bare per-table check is all this does — there is no
+    per-model mode switch to get wrong.
 
     A table that itself carries measures is pulled out and pinned above the groups
     instead of being alphabetized into one: it is architecturally a different kind of
     thing from a plain data table — typically a hidden container a modeler adds purely so
     calculated measures have somewhere to live — and deserves its own top-level slot
-    regardless of what its name happens to start with.
+    regardless of what its name happens to start or end with.
     """
     pinned = [t for t in tables if t.measures]
     rest = [t for t in tables if not t.measures]
 
     groups: dict[str, list[Table]] = {}
     for table in rest:
-        prefix = table.name.split(" ", 1)[0] if " " in table.name else ""
-        groups.setdefault(prefix or "General", []).append(table)
+        structural = _STRUCTURAL_SUFFIX.search(table.name)
+        if structural:
+            key = _STRUCTURAL_LABEL[structural.group(1).casefold()]
+        else:
+            prefix = table.name.split(" ", 1)[0] if " " in table.name else ""
+            key = prefix or "General"
+        groups.setdefault(key, []).append(table)
 
-    ordered_keys = sorted(groups, key=lambda k: (k != "General", k.casefold()))
+    def sort_key(name: str) -> tuple:
+        if name in _STRUCTURAL_ORDER:
+            return (0, _STRUCTURAL_ORDER[name], "")
+        return (1, 0 if name == "General" else 1, name.casefold())
+
+    ordered_keys = sorted(groups, key=sort_key)
     return pinned, [(key, groups[key]) for key in ordered_keys]
 
 

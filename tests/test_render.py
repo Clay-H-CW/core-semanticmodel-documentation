@@ -284,6 +284,47 @@ def test_table_groups_empty_input():
     assert groups == []
 
 
+def test_table_groups_splits_by_fact_dim_bridge_suffix():
+    # Real naming convention seen across several models (e.g. Cwe_Enrollment_Fact,
+    # Cwe_Client_Dim, Cwe_Service_Type_Category_Bridge) — not the space-prefix style
+    # HMIS uses, so this needs its own coverage.
+    from semdoc.ir.schema import Table
+
+    fact = Table(name="Cwe_Enrollment_Fact")
+    dim = Table(name="Cwe_Client_Dim")
+    bridge = Table(name="Cwe_Service_Type_Category_Bridge")
+    other = Table(name="Time Period")
+
+    _, groups = _table_groups([fact, dim, bridge, other])
+    assert dict(groups) == {
+        "Fact": [fact],
+        "Dimension": [dim],
+        "Bridge": [bridge],
+        "Time": [other],
+    }
+    # Fact leads, then Dimension, then Bridge, ahead of any fallback prefix group.
+    assert [key for key, _ in groups] == ["Fact", "Dimension", "Bridge", "Time"]
+
+
+def test_table_groups_suffix_match_requires_a_word_boundary():
+    # "ClientDim" runs the suffix straight into the preceding word with no separator —
+    # this project has only ever verified the underscore/space-separated convention
+    # (Cwe_Client_Dim, "Service Fact"), so a bare camelCase run must not be guessed at.
+    from semdoc.ir.schema import Table
+
+    camel_case = Table(name="ClientDim")
+    _, groups = _table_groups([camel_case])
+    assert dict(groups) == {"General": [camel_case]}
+
+
+def test_table_groups_bare_fact_dim_bridge_names_also_match():
+    from semdoc.ir.schema import Table
+
+    tables = [Table(name="Fact"), Table(name="Dim"), Table(name="Bridge")]
+    _, groups = _table_groups(tables)
+    assert [key for key, _ in groups] == ["Fact", "Dimension", "Bridge"]
+
+
 def test_sidebar_pins_measure_hosting_table_and_groups_the_rest_by_prefix(ir):
     # Fixture tables: Service Fact carries its own measures -> pinned. Client, Program,
     # Date, and Targets have no space in their names -> all fall into "General".
