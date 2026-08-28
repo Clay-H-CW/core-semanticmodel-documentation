@@ -139,6 +139,44 @@ def test_lineage_focus_narrows_to_the_focused_tables_subset(ir):
     assert "sm_Targets" not in mermaid
 
 
+def test_fact_relationship_map_none_for_a_single_fact_model(ir):
+    # Fixture has exactly one fact table — nothing for it to relate to.
+    assert diagrams.fact_relationship_map(ir.model) is None
+
+
+def test_fact_relationship_map_none_when_facts_share_nothing():
+    # Two facts, each with its own private dimension — genuinely unrelated, not just
+    # under-connected. An all-isolated-facts map would say nothing real.
+    from semdoc.ir.schema import Column, Model, Relationship, Table, TableKind
+
+    fact_a = Table(name="A_Fact", kind=TableKind.FACT, columns=[Column(name="XId")])
+    fact_b = Table(name="B_Fact", kind=TableKind.FACT, columns=[Column(name="YId")])
+    dim_x = Table(name="X_Dim", kind=TableKind.DIMENSION, columns=[Column(name="XId")])
+    dim_y = Table(name="Y_Dim", kind=TableKind.DIMENSION, columns=[Column(name="YId")])
+    model = Model(
+        name="Silos",
+        tables=[fact_a, fact_b, dim_x, dim_y],
+        relationships=[
+            Relationship(
+                name="r1", from_table="A_Fact", from_column="XId", to_table="X_Dim", to_column="XId"
+            ),
+            Relationship(
+                name="r2", from_table="B_Fact", from_column="YId", to_table="Y_Dim", to_column="YId"
+            ),
+        ],
+    )
+    assert diagrams.fact_relationship_map(model) is None
+
+
+def test_fact_relationship_map_includes_only_dimensions_shared_by_two_or_more_facts():
+    multi_ir = _multi_fact_ir()
+    mermaid = diagrams.fact_relationship_map(multi_ir.model)
+    assert mermaid is not None
+    assert "Orders" in mermaid
+    assert "Shipments" in mermaid
+    assert "Customer" in mermaid
+
+
 # -- html ------------------------------------------------------------------------------
 
 
@@ -774,6 +812,17 @@ def test_guide_shows_per_fact_diagrams_alongside_the_combined_one():
     assert html.count('class="focus-group"') >= 2
     assert "Orders" in html
     assert "Shipments" in html
+
+
+def test_guide_shows_the_fact_relationship_map_when_facts_share_a_dimension():
+    multi_ir = _multi_fact_ir()
+    html = render_guide(multi_ir, "technical")
+    assert "Or see how the fact tables connect through shared dimensions" in html
+
+
+def test_guide_omits_the_fact_relationship_map_for_a_single_fact_model(ir):
+    html = render_guide(ir, "technical")
+    assert "Or see how the fact tables connect through shared dimensions" not in html
 
 
 def test_guide_has_no_per_fact_supplement_for_a_single_fact_model(ir):

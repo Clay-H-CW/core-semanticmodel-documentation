@@ -240,3 +240,52 @@ def lineage_focus(ir: ModelIR, table_name: str) -> str | None:
     # Only `model` is required on ModelIR — warehouse_lineage never reads narrative,
     # reports, or validation, so there is nothing else worth carrying into this subset.
     return warehouse_lineage(ModelIR(model=subset))
+
+
+def fact_relationship_map(model: Model, *, label_hidden_columns: bool = True) -> str | None:
+    """How the fact tables relate to each other, through the dimensions they share.
+
+    Checked against every real model this project has extracted: fact tables never have
+    a *direct* relationship to another fact table (0 of several hundred relationships
+    across four real models). They relate to each other through a conformed dimension
+    both connect to — so that dimension is drawn explicitly rather than inventing a
+    synthetic fact-to-fact edge, which would hide which dimension is actually doing the
+    connecting.
+
+    A dimension touched by only one fact is dropped: it says something about that one
+    fact (already covered by its own per-fact diagram), nothing about how facts relate
+    to each other. This matters more than it might sound — checked live, a naive "any
+    shared dimension counts" graph is a near-complete hairball (every fact pair on
+    ServTracker turned out to share at least one dimension), because every fact
+    legitimately connects to the same handful of core dimensions (client, date,
+    provider...). Keeping only genuinely-shared dimensions is what keeps this diagram
+    small enough to be worth looking at.
+
+    Returns `None` when fewer than two facts exist, or none share a dimension — an
+    all-isolated-facts diagram would tell the reader nothing, same policy as
+    `measure_dependencies` when no measure builds on another.
+    """
+    facts = [t for t in model.tables if t.kind is TableKind.FACT]
+    if len(facts) < 2:
+        return None
+    fact_names = {t.name for t in facts}
+
+    dim_to_facts: dict[str, set[str]] = {}
+    for rel in model.relationships:
+        a, b = rel.from_table, rel.to_table
+        if a in fact_names and b not in fact_names:
+            dim_to_facts.setdefault(b, set()).add(a)
+        elif b in fact_names and a not in fact_names:
+            dim_to_facts.setdefault(a, set()).add(b)
+
+    shared_dims = {d for d, reached_by in dim_to_facts.items() if len(reached_by) >= 2}
+    if not shared_dims:
+        return None
+
+    keep = fact_names | shared_dims
+    subset = Model(
+        name=model.name,
+        tables=[t for t in model.tables if t.name in keep],
+        relationships=[r for r in model.relationships if r.from_table in keep and r.to_table in keep],
+    )
+    return star_schema(subset, label_hidden_columns=label_hidden_columns)

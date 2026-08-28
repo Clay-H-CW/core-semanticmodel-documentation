@@ -334,6 +334,9 @@ def _context(
         ),
         "warehouse_lineage": diagrams.warehouse_lineage(ir),
         "measure_dependencies": diagrams.measure_dependencies(model),
+        "fact_relationship_map": diagrams.fact_relationship_map(
+            model, label_hidden_columns=(variant == "technical")
+        ),
         "use_per_fact_diagrams": use_per_fact_diagrams,
         "per_fact_star": per_fact_star,
         "per_fact_lineage": per_fact_lineage,

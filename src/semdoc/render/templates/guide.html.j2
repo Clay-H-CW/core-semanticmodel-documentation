@@ -356,6 +356,19 @@
       {%- set edge_caption = 'Solid arrow: active relationship &middot; Dashed: inactive, needs <code>USERELATIONSHIP</code> &middot; Double arrow: filters both ways' %}
       {{ diagram(star_schema, none, edge_caption) }}
 
+      {%- if fact_relationship_map %}
+      {#- Fact tables never relate directly to one another (checked against every real
+          model this project has extracted) — they relate through a dimension both
+          connect to. This keeps only dimensions genuinely shared by 2+ facts, which is
+          what keeps it a small, readable map instead of the near-complete hairball a
+          "shares any dimension" version turns into once client/date/provider-style
+          dimensions are counted. -#}
+      <div>
+        <p class="section-note">Or see how the fact tables connect through shared dimensions:</p>
+      </div>
+      {{ diagram(fact_relationship_map, none, none) }}
+      {%- endif %}
+
       {%- if use_per_fact_diagrams %}
       {#- More than one fact table: the whole-model diagram above still shows the full
           picture (pan/zoom makes that navigable now), but a wall of dimensions all
