@@ -113,6 +113,17 @@
       {%- if model.workspace %}
       <span class="workspace">{{ model.workspace }}</span>
       {%- endif %}
+      {#- Only worth a switcher once there is something to switch to — a single-model
+          out/ renders exactly as it always has, with nothing here. -#}
+      {%- if available_models|length > 1 %}
+      <label class="hidden" for="model-switch">Switch model</label>
+      <select id="model-switch" class="model-switch"
+              onchange="if (this.value) { location.href = '../' + this.value + '/guide-{{ variant }}.html'; }">
+        {%- for m in available_models %}
+        <option value="{{ m.slug }}" {{ "selected" if m.slug == model_slug else "" }}>{{ m.name }}</option>
+        {%- endfor %}
+      </select>
+      {%- endif %}
     </div>
 
     <div class="filter-field">
@@ -1024,7 +1035,10 @@
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ history: history })
+      // Which model to answer against — the server holds every extracted model's IR, so
+      // this is what keeps chat grounded in whichever guide is actually on screen after
+      // switching models via the sidebar dropdown, not whichever loaded first at startup.
+      body: JSON.stringify({ history: history, slug: "{{ model_slug }}" })
     })
       .then(function (response) {
         return response.json().then(function (data) {

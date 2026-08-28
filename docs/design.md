@@ -164,6 +164,35 @@ Field references are resolved back against the current model and dropped (not gu
 at) when they no longer match — the same "missing means not extracted" policy as
 `WarehouseTable.reads_from`.
 
+### D9: Multiple models — the directory tree is the catalog, not a manifest
+
+`out/` holds one subdirectory per extracted model (`out/<slug>/model-ir.json` +
+`guide-*.html`), slug derived deterministically from `f"{workspace} {model_name}"`
+(`catalog.model_slug`). Re-extracting the same workspace/model always resolves to the
+same directory and overwrites only that; a different workspace or model always gets a
+fresh sibling — extracting a second model can never clobber a first one by construction,
+not by convention.
+
+Considered and rejected: a separate `registry.json` tracking what's been extracted.
+Rejected because it is a second source of truth that can drift from reality (a manually
+deleted model directory would leave a dangling registry entry, producing a dead link in
+every other guide's dropdown) — see `docs/design.md`'s own running theme of preferring
+"can't drift" over "must remember to keep in sync" (same reasoning as D1's single IR
+contract). Instead, `catalog.discover_models` scans `out/*/model-ir.json` directly, on
+every `render`/`serve` call. It reads only the handful of fields a dropdown needs
+straight out of the raw JSON — not a full `ModelIR.model_validate_json` — so a sibling
+model's IR from an older schema still lists correctly (if not necessarily usably) even
+though this project has, more than once, changed the IR schema out from under an
+already-extracted model.
+
+The dropdown in each guide is baked in at render time, not fetched at runtime: guides
+are meant to open directly via `file://` with no server at all, and `fetch()` against
+`file://` is blocked by browser CORS policy anyway. The consequence is that `render`
+re-renders every sibling model's guides whenever one changes, not just the target model
+— cheap, since it only needs each sibling's already-stored IR, no Fabric access — so
+every dropdown always reflects the full, current roster rather than whichever model was
+rendered most recently.
+
 ## Extraction extras worth grabbing
 
 - **Existing descriptions.** Many models already have some. These are ground truth: the

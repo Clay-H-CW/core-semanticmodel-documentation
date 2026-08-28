@@ -47,7 +47,7 @@ Copy-Item .env.example .env    # then fill it in
 semdoc workspaces
 semdoc models --workspace "Analytics"
 
-# Extract a model to out/model-ir.json
+# Extract a model to out/<slug>/model-ir.json
 semdoc extract --workspace "Analytics" --model "Case Services Analytics"
 
 # Render guides from the stored IR (no Fabric access needed)
@@ -63,6 +63,31 @@ semdoc serve --variant business --port 8080
 
 `extract` and `render` are separate so templates and prompts can be iterated offline
 against a stored IR. Add `--save-tmsl` to keep the raw `model.bim` for use as a fixture.
+
+### Multiple models
+
+`out/` can hold more than one extracted model side by side — each in its own
+`out/<slug>/` directory, slugged from its workspace and name, so extracting a second
+model never touches the first. `render` picks up every model already in `out/` and gives
+every one of them a dropdown in its sidebar to switch to any other; re-rendering one
+model quietly refreshes the others too, so the dropdown always lists the full, current
+set. Chat follows along — it answers against whichever model's guide is actually open,
+not whichever loaded first.
+
+Every command below `extract` takes `--model <slug-or-name>` to say which already-extracted
+model to operate on. It's optional as long as there's only one in `out/` (today's
+single-model setups need no flag changes at all); once there's more than one, commands
+that would otherwise be ambiguous ask for it and list what's available:
+
+```powershell
+semdoc extract --workspace "Dev_Baseline" --model "CaseWorthy_Gold"   # lands in its own out/<slug>/
+semdoc render --model "CaseWorthy_Gold"                               # or the slug directly
+semdoc serve --model "CaseWorthy_Gold"                                # picks the landing page
+```
+
+`--ir <path>` still works everywhere and always wins outright — pointing it at a fixture
+outside `out/` entirely (for offline template iteration) renders standalone, with no
+sibling dropdown.
 
 ### Optional passes
 
@@ -93,10 +118,10 @@ badge in the first place.
 
 | File | Audience |
 |---|---|
-| `out/guide-technical.html` | Report builders and developers — full column inventory with data types, verbatim DAX, RLS filter expressions, warehouse lineage, relationship table |
-| `out/guide-business.html` | End users — what the model answers and how to build it; internal keys, DAX bodies, and warehouse detail omitted |
-| `out/vendor/mermaid.min.js` | Diagram renderer, shared by both guides |
-| `out/model-ir.json` | The intermediate representation everything downstream reads |
+| `out/<slug>/guide-technical.html` | Report builders and developers — full column inventory with data types, verbatim DAX, RLS filter expressions, warehouse lineage, relationship table |
+| `out/<slug>/guide-business.html` | End users — what the model answers and how to build it; internal keys, DAX bodies, and warehouse detail omitted |
+| `out/vendor/mermaid.min.js` | Diagram renderer, shared across every model's guides |
+| `out/<slug>/model-ir.json` | The intermediate representation everything downstream reads, one per model |
 
 Diagrams are authored as Mermaid source, so they also render natively in GitHub/Azure
 DevOps markdown and stay diffable in Git — no headless browser or image pipeline.
@@ -153,6 +178,8 @@ just the fixture):
 - [x] Best Practice Analyzer findings — 21 of the 30 community Tabular Editor rules
 - [x] Existing-report usage: which fields/measures each Power BI report on the model
       actually uses (`reports extract`), for the legacy single-file report format
+- [x] Multiple models side by side in one `out/`, each in its own slugged directory,
+      with a sidebar dropdown (and slug-aware chat) to switch between them
 
 Not yet built:
 

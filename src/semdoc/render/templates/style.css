@@ -176,6 +176,18 @@ body {
   letter-spacing: 0.02em;
 }
 
+.model-switch {
+  margin-top: 0.4rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+}
+
 .filter-field {
   position: relative;
 }

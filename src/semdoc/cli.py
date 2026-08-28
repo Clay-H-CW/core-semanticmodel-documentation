@@ -2,8 +2,9 @@
 
     semdoc workspaces                     list workspaces you can see
     semdoc models --workspace W           list semantic models in a workspace
-    semdoc extract --workspace W --model M   pull the model into out/model-ir.json
-    semdoc render                         render guides from a stored IR
+    semdoc extract --workspace W --model M   pull the model into out/<slug>/model-ir.json
+    semdoc render                         render guides for a stored IR (--model to pick
+                                           one, when out/ holds more than one)
     semdoc generate --workspace W --model M  extract and render in one pass
     semdoc narrative apply FILE           validate narrative JSON against the model, attach it
     semdoc warehouse extract              schema, view SQL, and best-effort lineage for
@@ -16,6 +17,13 @@
 `extract` and `render` are separate on purpose: extraction needs Fabric access, while
 rendering needs only the stored IR. That split makes it possible to iterate on templates
 and prompts offline, and to check a reference IR into the repo as a test fixture.
+
+`out/` can hold more than one extracted model side by side, one subdirectory per model
+(named by `catalog.model_slug`) — extracting a new model never touches another one's
+directory. `--ir` still accepts a direct path to any IR file (in or out of `out/`, e.g. a
+fixture) for the commands below that read one; `--model` instead picks among whatever is
+already sitting in `out/` by slug or display name, and is only needed once there is more
+than one to choose from.
 """
 
 from __future__ import annotations
@@ -27,7 +35,7 @@ import os
 import pathlib
 import sys
 
-from semdoc import __version__
+from semdoc import __version__, catalog
 from semdoc.auth import credential_from_env
 from semdoc.config import enrich_model, load_env
 from semdoc.fabric import FabricClient, FabricError
@@ -69,6 +77,49 @@ def _load_ir(path: pathlib.Path) -> ModelIR:
     return ModelIR.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def _describe_models(models: list[dict]) -> str:
+    return ", ".join(f"{m['name']!r} ({m['slug']})" for m in models)
+
+
+def _match_model(models: list[dict], selector: str) -> dict | None:
+    """Match `--model` against either a slug or a display name, case-insensitively."""
+    lowered = selector.casefold()
+    return next((m for m in models if m["slug"] == lowered or m["name"].casefold() == lowered), None)
+
+
+def _resolve_ir_path(out_root: pathlib.Path, ir_arg: str | None, model_arg: str | None) -> pathlib.Path:
+    """Find the IR to operate on, for every command except `extract` itself.
+
+    `--ir` wins outright when given — this is also how a fixture outside `out/` entirely
+    (e.g. for offline template iteration) gets used. Otherwise this looks at what has
+    actually been extracted into `out_root`: exactly one model needs no `--model` at all
+    (today's single-model setups keep working with zero flag changes); more than one
+    requires `--model` to say which.
+    """
+    if ir_arg:
+        return pathlib.Path(ir_arg)
+
+    found = catalog.discover_models(out_root)
+    if not found:
+        raise SystemExit(f"No model extracted into {out_root}. Run `semdoc extract` first.")
+
+    if model_arg:
+        match = _match_model(found, model_arg)
+        if match is None:
+            raise SystemExit(
+                f"No extracted model matches --model {model_arg!r}. Available: {_describe_models(found)}"
+            )
+        return out_root / match["slug"] / IR_FILENAME
+
+    if len(found) == 1:
+        return out_root / found[0]["slug"] / IR_FILENAME
+
+    raise SystemExit(
+        f"Multiple models extracted into {out_root} — pass --model to pick one. "
+        f"Available: {_describe_models(found)}"
+    )
+
+
 # -- commands --------------------------------------------------------------------------
 
 
@@ -99,18 +150,23 @@ def cmd_models(args: argparse.Namespace) -> int:
 def cmd_extract(args: argparse.Namespace) -> int:
     workspace = _resolve(args, "workspace", "SEMDOC_WORKSPACE")
     model_name = _resolve(args, "model", "SEMDOC_SEMANTIC_MODEL")
-    out_dir = pathlib.Path(args.out)
+    out_root = pathlib.Path(args.out)
 
     with FabricClient(credential_from_env()) as client:
         ws = client.find_workspace(workspace)
         sm = client.find_semantic_model(ws["id"], model_name)
         print(f"Extracting {sm['displayName']!r} from {ws['displayName']!r}…", file=sys.stderr)
 
+        # Deterministic from workspace + model name: re-extracting this same model always
+        # lands back in its own directory; a different workspace or model name always
+        # gets a fresh sibling one. Nothing else in out/ is touched either way.
+        model_dir = out_root / catalog.model_slug(ws["displayName"], sm["displayName"])
+
         tmsl = client.get_tmsl(ws["id"], sm["id"])
 
         if args.save_tmsl:
-            out_dir.mkdir(parents=True, exist_ok=True)
-            raw_path = out_dir / "model.bim"
+            model_dir.mkdir(parents=True, exist_ok=True)
+            raw_path = model_dir / "model.bim"
             raw_path.write_text(json.dumps(tmsl, indent=2), encoding="utf-8")
             print(f"  raw TMSL -> {raw_path}", file=sys.stderr)
 
@@ -138,7 +194,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         model=model, warehouse=warehouse, generated_at=_now(), source_tool_version=__version__
     )
 
-    path = _write_ir(ir, out_dir / IR_FILENAME)
+    path = _write_ir(ir, model_dir / IR_FILENAME)
     if warehouse:
         print(f"  warehouse: {warehouse.database} on {warehouse.server}", file=sys.stderr)
     print(
@@ -151,16 +207,47 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
 
 def cmd_render(args: argparse.Namespace) -> int:
-    out_dir = pathlib.Path(args.out)
-    ir = _load_ir(out_dir / IR_FILENAME if args.ir is None else pathlib.Path(args.ir))
+    """Render one model's guides — and, when it lives in `out/`'s multi-model tree,
+    quietly refresh every sibling model's guides too, so every dropdown lists the full,
+    current roster rather than only whichever model was rendered most recently.
+    """
+    out_root = pathlib.Path(args.out)
+    ir_path = _resolve_ir_path(out_root, args.ir, args.model)
+    ir = _load_ir(ir_path)
+    model_dir = ir_path.parent
 
+    # An explicit --ir pointing outside out/ entirely (e.g. a checked-in fixture, for
+    # offline template iteration) renders standalone: no sibling dropdown, no shared
+    # vendor/ reused from a tree it isn't part of.
+    in_catalog = out_root.exists() and model_dir.resolve().is_relative_to(out_root.resolve())
+    all_models = catalog.discover_models(out_root) if in_catalog else []
+    vendor_dir = out_root / "vendor" if in_catalog else model_dir / "vendor"
+
+    written: dict[str, pathlib.Path] = {}
     try:
         written = write_guides(
             ir,
-            out_dir,
+            model_dir,
+            vendor_dir=vendor_dir,
+            available_models=all_models,
             inline_assets=args.inline_assets,
             with_diagrams=not args.no_diagrams,
         )
+
+        for entry in all_models:
+            if entry["slug"] == model_dir.name:
+                continue
+            sibling_dir = out_root / entry["slug"]
+            sibling_ir = _load_ir(sibling_dir / IR_FILENAME)
+            write_guides(
+                sibling_ir,
+                sibling_dir,
+                vendor_dir=vendor_dir,
+                available_models=all_models,
+                inline_assets=args.inline_assets,
+                with_diagrams=not args.no_diagrams,
+            )
+            print(f"  also refreshed: {entry['slug']} (dropdown now lists every model)", file=sys.stderr)
     except AssetError as exc:
         print(f"{exc}\n\nRe-run with --no-diagrams to render without them.", file=sys.stderr)
         return 3
@@ -177,8 +264,8 @@ def cmd_warehouse_extract(args: argparse.Namespace) -> int:
     """
     from semdoc import warehouse as warehouse_module
 
-    out_dir = pathlib.Path(args.out)
-    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    out_root = pathlib.Path(args.out)
+    ir_path = _resolve_ir_path(out_root, args.ir, args.model)
     ir = _load_ir(ir_path)
 
     if ir.warehouse is None:
@@ -223,8 +310,8 @@ def cmd_stats_extract(args: argparse.Namespace) -> int:
     """
     from semdoc import stats as stats_module
 
-    out_dir = pathlib.Path(args.out)
-    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    out_root = pathlib.Path(args.out)
+    ir_path = _resolve_ir_path(out_root, args.ir, args.model)
     ir = _load_ir(ir_path)
 
     profilable = sum(len(cols) for _, cols in stats_module.profilable_columns(ir.model))
@@ -260,8 +347,8 @@ def cmd_reports_extract(args: argparse.Namespace) -> int:
     """Find every Power BI report built on this model and what it actually uses."""
     from semdoc import reports as reports_module
 
-    out_dir = pathlib.Path(args.out)
-    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    out_root = pathlib.Path(args.out)
+    ir_path = _resolve_ir_path(out_root, args.ir, args.model)
     ir = _load_ir(ir_path)
 
     try:
@@ -296,8 +383,8 @@ def cmd_narrative_apply(args: argparse.Namespace) -> int:
     output of an automated `semdoc enrich` pass. All three go through the same check
     here, because all three can misname a field.
     """
-    out_dir = pathlib.Path(args.out)
-    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    out_root = pathlib.Path(args.out)
+    ir_path = _resolve_ir_path(out_root, args.ir, args.model)
     ir = _load_ir(ir_path)
 
     narrative_path = pathlib.Path(args.narrative_path)
@@ -353,19 +440,40 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if not out_dir.exists():
         raise SystemExit(f"{out_dir} does not exist. Run `semdoc render` first.")
 
-    landing = f"guide-{args.variant}.html"
-    if not (out_dir / landing).exists():
-        available = sorted(p.name for p in out_dir.glob("guide-*.html"))
+    all_models = catalog.discover_models(out_dir)
+    if not all_models:
+        raise SystemExit(f"No rendered model found under {out_dir}. Run `semdoc render` first.")
+
+    if args.model:
+        match = _match_model(all_models, args.model)
+        if match is None:
+            raise SystemExit(
+                f"No model matches --model {args.model!r}. Available: {_describe_models(all_models)}"
+            )
+        landing_slug = match["slug"]
+    elif len(all_models) == 1:
+        landing_slug = all_models[0]["slug"]
+    else:
         raise SystemExit(
-            f"{landing} not found in {out_dir}. "
-            f"Present: {', '.join(available) if available else 'nothing rendered yet'}"
+            f"Multiple models rendered under {out_dir} — pass --model to pick a landing "
+            f"page. Available: {_describe_models(all_models)}"
         )
 
-    # Loaded once at startup, not per request: re-run `semdoc extract` and restart the
-    # server to pick up a changed model. Missing is not fatal — the guide still browses
-    # fine without chat.
-    ir_path = out_dir / IR_FILENAME
-    ir = _load_ir(ir_path) if ir_path.exists() else None
+    landing = f"{landing_slug}/guide-{args.variant}.html"
+    if not (out_dir / landing).exists():
+        raise SystemExit(f"{landing} not found in {out_dir}. Re-run `semdoc render`.")
+
+    # Loaded once at startup, not per request: re-run `semdoc render` and restart the
+    # server to pick up changed models. A model that fails to load here just has no
+    # working chat — the guide itself still browses fine either way, same as before this
+    # was ever a dict — and it does not stop the other models' chat from working.
+    models_by_slug: dict[str, ModelIR] = {}
+    for entry in all_models:
+        ir_file = out_dir / entry["slug"] / IR_FILENAME
+        try:
+            models_by_slug[entry["slug"]] = ModelIR.model_validate_json(ir_file.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - best-effort per model, never fatal to serve
+            print(f"  WARNING: could not load {entry['slug']} for chat: {exc}", file=sys.stderr)
 
     # `Anthropic()` with no api_key resolves ANTHROPIC_API_KEY from the environment
     # (already loaded from .env by main()). Left unset when there is no key so chat
@@ -390,9 +498,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 self.send_error(404)
                 return
 
-            if ir is None:
-                send_json(self, 503, {"error": "No model extracted yet. Run `semdoc extract` first."})
-                return
             if anthropic_client is None:
                 send_json(
                     self,
@@ -405,10 +510,18 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}")
                 history = body.get("history")
+                slug = body.get("slug")
                 if not isinstance(history, list) or not history:
                     raise ValueError("history must be a non-empty list")
+                if not isinstance(slug, str) or not slug:
+                    raise ValueError("slug must be a non-empty string")
             except (ValueError, json.JSONDecodeError) as exc:
                 send_json(self, 400, {"error": f"Bad request: {exc}"})
+                return
+
+            ir = models_by_slug.get(slug)
+            if ir is None:
+                send_json(self, 404, {"error": f"Unknown model {slug!r}."})
                 return
 
             try:
@@ -432,6 +545,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     url = f"http://127.0.0.1:{server.server_port}/{landing}"
     print(f"Serving {out_dir}", file=sys.stderr)
     print(f"  {url}", file=sys.stderr)
+    if len(all_models) > 1:
+        others = ", ".join(m["name"] for m in all_models if m["slug"] != landing_slug)
+        print(f"  Also available via the dropdown: {others}", file=sys.stderr)
     if anthropic_client is None:
         print("  Chat disabled — set ANTHROPIC_API_KEY in .env to enable it.", file=sys.stderr)
     else:
@@ -489,6 +605,14 @@ def build_parser() -> argparse.ArgumentParser:
             help="Also write the raw model.bim, useful for building test fixtures.",
         )
 
+    def add_model_selector(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--model",
+            "-m",
+            help="Which already-extracted model to use, by slug or display name — only "
+            "needed when <out> holds more than one. Ignored if --ir is also given.",
+        )
+
     def add_render_opts(p: argparse.ArgumentParser) -> None:
         p.add_argument(
             "--inline-assets",
@@ -507,7 +631,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.set_defaults(func=cmd_extract)
 
     p_render = sub.add_parser("render", help="Render guides from a stored IR.")
-    p_render.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_render.add_argument("--ir", help="Path to an IR file (overrides --model entirely).")
+    add_model_selector(p_render)
     add_render_opts(p_render)
     p_render.set_defaults(func=cmd_render)
 
@@ -519,7 +644,8 @@ def build_parser() -> argparse.ArgumentParser:
         "apply", help="Validate a narrative JSON file against the model and attach it."
     )
     p_narrative_apply.add_argument("narrative_path", help="Path to a Narrative-schema JSON file.")
-    p_narrative_apply.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_narrative_apply.add_argument("--ir", help="Path to an IR file (overrides --model entirely).")
+    add_model_selector(p_narrative_apply)
     p_narrative_apply.add_argument(
         "--force",
         action="store_true",
@@ -534,9 +660,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pull schema, view SQL, and best-effort lineage for warehouse objects the "
         "model reads from.",
     )
-    p_warehouse_extract.add_argument(
-        "--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME})."
-    )
+    p_warehouse_extract.add_argument("--ir", help="Path to an IR file (overrides --model entirely).")
+    add_model_selector(p_warehouse_extract)
     p_warehouse_extract.set_defaults(func=cmd_warehouse_extract)
 
     p_stats = sub.add_parser("stats", help="Column cardinality and sample values, via live DAX.")
@@ -544,7 +669,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats_extract = stats_sub.add_parser(
         "extract", help="Profile every visible column so the guide can flag good slicers."
     )
-    p_stats_extract.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_stats_extract.add_argument("--ir", help="Path to an IR file (overrides --model entirely).")
+    add_model_selector(p_stats_extract)
     p_stats_extract.add_argument(
         "--sample-threshold",
         type=int,
@@ -559,7 +685,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_reports_extract = reports_sub.add_parser(
         "extract", help="Find every report built on this model and what it actually uses."
     )
-    p_reports_extract.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_reports_extract.add_argument("--ir", help="Path to an IR file (overrides --model entirely).")
+    add_model_selector(p_reports_extract)
     p_reports_extract.set_defaults(func=cmd_reports_extract)
 
     p_generate = sub.add_parser("generate", help="Extract and render in one pass.")
@@ -569,6 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_serve = sub.add_parser("serve", help="Serve the rendered guides on localhost.")
     p_serve.add_argument("--port", type=int, default=8000, help="Port (default: 8000).")
+    add_model_selector(p_serve)
     p_serve.add_argument(
         "--variant",
         choices=("technical", "business"),

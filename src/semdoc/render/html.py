@@ -13,6 +13,7 @@ Always a complete, self-contained HTML document, meant to be opened locally or s
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -161,6 +162,8 @@ def _context(
     variant: str,
     mermaid_mode: str,
     mermaid_src_url: str,
+    model_slug: str,
+    available_models: list[dict],
 ) -> dict:
     model = ir.model
 
@@ -203,6 +206,10 @@ def _context(
         "heading": heading,
         "subtitle": subtitle,
         "verification_state": verification_state,
+        "model_slug": model_slug,
+        # Only worth showing a switcher once there is something to switch to; a
+        # single-model out/ renders exactly as it always has.
+        "available_models": available_models,
         "visible_tables": visible_tables,
         "pinned_tables": pinned_tables,
         "table_groups": table_groups,
@@ -246,6 +253,8 @@ def render_guide(
     *,
     mermaid_mode: str = "link",
     mermaid_src_url: str = "vendor/mermaid.min.js",
+    model_slug: str = "",
+    available_models: list[dict] | None = None,
 ) -> str:
     if variant not in VARIANTS:
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
@@ -254,34 +263,63 @@ def render_guide(
 
     env = _build_environment()
     template = env.get_template("guide.html.j2")
-    return template.render(**_context(ir, variant, mermaid_mode, mermaid_src_url))
+    context = _context(ir, variant, mermaid_mode, mermaid_src_url, model_slug, available_models or [])
+    return template.render(**context)
 
 
 def write_guides(
     ir: ModelIR,
-    out_dir: Path,
+    model_dir: Path,
     *,
+    vendor_dir: Path | None = None,
+    available_models: list[dict] | None = None,
     inline_assets: bool = False,
     with_diagrams: bool = True,
 ) -> dict[str, Path]:
-    """Write both audience variants into `out_dir`.
+    """Write both audience variants into `model_dir`.
+
+    `model_dir`'s own name is this model's slug — the multi-model layout has no separate
+    slug parameter to pass, because the directory name *is* the source of truth
+    `catalog.discover_models` reads back later; keeping one spelling avoids the two ever
+    disagreeing. `vendor_dir` defaults to a `vendor/` subdirectory of `model_dir` itself
+    (a standalone single-model output, as this always was before multi-model support);
+    pass the shared `out/vendor` root explicitly to reuse one Mermaid copy across models.
 
     `with_diagrams` installs the Mermaid bundle so the guides render diagrams when opened
     directly from disk. Set it False for an offline run with no cached bundle; the pages
     then show diagram source as text instead of failing.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    vendor_dir = vendor_dir or (model_dir / "vendor")
+    slug = model_dir.name
     written: dict[str, Path] = {}
 
     mermaid_mode = "none"
+    mermaid_src_url = ""
     if with_diagrams:
         mermaid_mode = "inline" if inline_assets else "link"
         if mermaid_mode == "link":
-            written["mermaid"] = assets.install_mermaid(out_dir)
+            # install_mermaid(parent) creates parent/vendor/mermaid.min.js — pass
+            # vendor_dir's *parent* so the file lands at vendor_dir itself, not at
+            # vendor_dir/vendor.
+            installed = assets.install_mermaid(vendor_dir.parent)
+            written["mermaid"] = installed
+            # Posix-style even on Windows: this is a browser src attribute, not a
+            # filesystem path — a backslash there is silently treated as a literal
+            # character, not a separator, and the diagram fails to load.
+            mermaid_src_url = Path(os.path.relpath(installed, model_dir)).as_posix()
 
     for variant in VARIANTS:
-        path = out_dir / f"guide-{variant}.html"
-        path.write_text(render_guide(ir, variant, mermaid_mode=mermaid_mode), encoding="utf-8")
+        path = model_dir / f"guide-{variant}.html"
+        html = render_guide(
+            ir,
+            variant,
+            mermaid_mode=mermaid_mode,
+            mermaid_src_url=mermaid_src_url,
+            model_slug=slug,
+            available_models=available_models,
+        )
+        path.write_text(html, encoding="utf-8")
         written[variant] = path
 
     return written

@@ -546,3 +546,35 @@ def test_report_usage_badge_absent_for_unused_measure(reports_ir):
     measure_card = html[measure_start:next_card]
     assert "in 1 report" not in measure_card
     assert "report-usage" not in measure_card
+
+
+# -- multi-model switcher ------------------------------------------------------------------
+
+
+def test_model_switcher_absent_with_no_available_models(ir):
+    html = render_guide(ir, "technical")
+    assert 'id="model-switch"' not in html
+
+
+def test_model_switcher_absent_with_only_one_model(ir):
+    html = render_guide(ir, "technical", available_models=[{"slug": "x", "name": "X", "workspace": None}])
+    assert 'id="model-switch"' not in html
+
+
+def test_model_switcher_present_with_two_models_and_marks_current(ir):
+    models = [
+        {"slug": "model-a", "name": "Model A", "workspace": None},
+        {"slug": "model-b", "name": "Model B", "workspace": None},
+    ]
+    html = render_guide(ir, "business", model_slug="model-a", available_models=models)
+    assert 'id="model-switch"' in html
+    assert '<option value="model-a" selected>Model A</option>' in html
+    assert '<option value="model-b" selected>Model B</option>' not in html
+    assert '<option value="model-b" >Model B</option>' in html
+    # Switching must preserve the variant currently being viewed.
+    assert "/guide-business.html" in html
+
+
+def test_chat_request_carries_the_current_model_slug(ir):
+    html = render_guide(ir, "technical", model_slug="hmis-directlake")
+    assert 'slug: "hmis-directlake"' in html
