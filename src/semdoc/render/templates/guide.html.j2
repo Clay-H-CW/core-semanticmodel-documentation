@@ -506,7 +506,7 @@
           </p>
           {%- endif %}
 
-          {%- set cols = table.columns if variant == "technical" else table.columns|rejectattr("is_hidden")|list %}
+          {%- set cols = table.columns if variant == "technical" else table.columns|rejectattr("is_hidden")|rejectattr("is_key")|list %}
           {%- set has_stats = cols|rejectattr("cardinality", "none")|list|length > 0 %}
           {%- if cols %}
           <div class="table-scroll">

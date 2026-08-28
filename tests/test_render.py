@@ -217,6 +217,30 @@ def test_business_variant_hides_internal_key_columns(ir):
     assert "ClientKey" not in html
 
 
+def test_business_variant_hides_a_visible_key_column():
+    # Found against the real HMIS model: a key column that is *not* marked hidden in the
+    # model (is_key=True but is_hidden=False) still showed up in the business variant,
+    # directly contradicting that section's own "internal key columns are omitted" text
+    # — the filter only ever checked is_hidden, never is_key.
+    from semdoc.ir.schema import Column, Model, Table
+
+    model = Model(
+        name="M",
+        tables=[
+            Table(
+                name="T",
+                columns=[
+                    Column(name="VisibleKey", is_key=True, is_hidden=False),
+                    Column(name="RealField", is_hidden=False),
+                ],
+            )
+        ],
+    )
+    html = render_guide(ModelIR(model=model), "business")
+    assert "VisibleKey" not in html
+    assert "RealField" in html
+
+
 def test_inactive_relationship_is_surfaced_in_both_variants(ir):
     for variant in ("technical", "business"):
         html = render_guide(ir, variant)
