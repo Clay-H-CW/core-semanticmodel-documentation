@@ -8,6 +8,7 @@
     semdoc narrative apply FILE           validate narrative JSON against the model, attach it
     semdoc warehouse extract              schema, view SQL, and best-effort lineage for
                                            warehouse objects the model reads from
+    semdoc stats extract                  column cardinality and sample values via live DAX
     semdoc serve                          serve guides locally, with the chat widget if
                                            ANTHROPIC_API_KEY is set
 
@@ -212,6 +213,37 @@ def cmd_warehouse_extract(args: argparse.Namespace) -> int:
     ir.warehouse = updated_warehouse
     _write_ir(ir, ir_path)
     print(f"Warehouse detail attached -> {ir_path}")
+    return 0
+
+
+def cmd_stats_extract(args: argparse.Namespace) -> int:
+    """Populate column cardinality and sample values via live DAX, so the guide can tell
+    a report author which columns are good slicers.
+    """
+    from semdoc import stats as stats_module
+
+    out_dir = pathlib.Path(args.out)
+    ir_path = pathlib.Path(args.ir) if args.ir else out_dir / IR_FILENAME
+    ir = _load_ir(ir_path)
+
+    profilable = sum(len(cols) for _, cols in stats_module.profilable_columns(ir.model))
+    print(f"Profiling {profilable} visible column(s)…", file=sys.stderr)
+
+    try:
+        with FabricClient(credential_from_env()) as client:
+            failed = stats_module.extract_column_stats(
+                ir.model, client, sample_threshold=args.sample_threshold
+            )
+    except stats_module.StatsError as exc:
+        print(f"Column stats extraction failed: {exc}", file=sys.stderr)
+        return 5
+
+    print(f"  {profilable - len(failed)} column(s) profiled, {len(failed)} failed", file=sys.stderr)
+    for name in failed:
+        print(f"    FAILED: {name}", file=sys.stderr)
+
+    _write_ir(ir, ir_path)
+    print(f"Column stats attached -> {ir_path}")
     return 0
 
 
@@ -465,6 +497,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME})."
     )
     p_warehouse_extract.set_defaults(func=cmd_warehouse_extract)
+
+    p_stats = sub.add_parser("stats", help="Column cardinality and sample values, via live DAX.")
+    stats_sub = p_stats.add_subparsers(dest="stats_command", required=True)
+    p_stats_extract = stats_sub.add_parser(
+        "extract", help="Profile every visible column so the guide can flag good slicers."
+    )
+    p_stats_extract.add_argument("--ir", help=f"Path to an IR file (default: <out>/{IR_FILENAME}).")
+    p_stats_extract.add_argument(
+        "--sample-threshold",
+        type=int,
+        default=50,
+        help="Skip sample values above this many distinct values (default: 50). "
+        "Cardinality is still recorded either way.",
+    )
+    p_stats_extract.set_defaults(func=cmd_stats_extract)
 
     p_generate = sub.add_parser("generate", help="Extract and render in one pass.")
     add_target(p_generate)

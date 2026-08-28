@@ -51,6 +51,25 @@
   </a>
 {%- endmacro -%}
 
+{#- Thresholds are a judgment call, not a rule from anywhere: <=20 reads comfortably in a
+    slicer, <=200 is still usable (a search-as-you-type filter, say), beyond that a direct
+    filter is the wrong tool regardless of how "correct" the field is. -#}
+{%- macro cardinality_badge(column) -%}
+  {%- if column.cardinality is not none -%}
+    {%- if column.cardinality <= 20 -%}
+      {%- set css_class = "cardinality-good" %}{% set label = "good filter" %}
+    {%- elif column.cardinality <= 200 -%}
+      {%- set css_class = "cardinality-ok" %}{% set label = "usable filter" %}
+    {%- else -%}
+      {%- set css_class = "cardinality-high" %}{% set label = "too many values to filter by" %}
+    {%- endif -%}
+    <span class="chip {{ css_class }}" title="{{ label }}">{{ "{:,}".format(column.cardinality) }} values</span>
+    {%- if column.sample_values %}
+    <div class="sample-values">e.g. {{ column.sample_values[:3]|join(", ") }}</div>
+    {%- endif %}
+  {%- endif -%}
+{%- endmacro -%}
+
 {%- macro ref_chips(refs) -%}
   {%- if refs -%}
     <div class="field-list">
@@ -488,12 +507,14 @@
           {%- endif %}
 
           {%- set cols = table.columns if variant == "technical" else table.columns|rejectattr("is_hidden")|list %}
+          {%- set has_stats = cols|rejectattr("cardinality", "none")|list|length > 0 %}
           {%- if cols %}
           <div class="table-scroll">
             <table>
               <thead>
                 <tr>
                   <th>Column</th>
+                  {%- if has_stats %}<th>Values</th>{% endif %}
                   {%- if variant == "technical" %}<th>Type</th>{% endif %}
                   <th>Description</th>
                   {%- if variant == "technical" %}<th>Source column</th>{% endif %}
@@ -507,6 +528,9 @@
                     {%- if col.is_hidden %} <span class="chip hidden-flag">hidden</span>{% endif %}
                     {%- if col.is_key %} <span class="chip">key</span>{% endif %}
                   </td>
+                  {%- if has_stats %}
+                  <td class="values">{{ cardinality_badge(col) }}</td>
+                  {%- endif %}
                   {%- if variant == "technical" %}<td class="type">{{ col.data_type }}</td>{% endif %}
                   {%- if col.description %}
                   <td class="desc">{{ col.description }}</td>

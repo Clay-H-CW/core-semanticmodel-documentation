@@ -406,6 +406,42 @@ def test_data_model_section_includes_chip_legend_in_both_variants(ir):
         assert "the thing being measured" in html
 
 
+def test_low_cardinality_column_shown_as_good_filter(ir):
+    stats_ir = ir.model_copy(deep=True)
+    stats_ir.model.table("Client").column("County").cardinality = 12
+    stats_ir.model.table("Client").column("County").sample_values = ["Alameda", "Contra Costa", "Marin"]
+    html = render_guide(stats_ir, "business")
+    assert 'class="chip cardinality-good"' in html
+    assert "12 values" in html
+    assert "Alameda, Contra Costa, Marin" in html
+
+
+def test_high_cardinality_column_shown_as_too_many_to_filter(ir):
+    stats_ir = ir.model_copy(deep=True)
+    stats_ir.model.table("Service Fact").column("Units").cardinality = 84213
+    html = render_guide(stats_ir, "business")
+    assert 'class="chip cardinality-high"' in html
+    assert "84,213 values" in html
+
+
+def test_values_column_omitted_when_table_has_no_profiled_columns(ir):
+    # None of the fixture's columns have cardinality set by default - the "Values"
+    # column header should not appear at all rather than show as empty everywhere.
+    html = render_guide(ir, "business")
+    assert "<th>Values</th>" not in html
+
+
+def test_unprofiled_column_shows_no_cardinality_badge_even_when_table_has_stats(ir):
+    stats_ir = ir.model_copy(deep=True)
+    stats_ir.model.table("Client").column("County").cardinality = 12
+    html = render_guide(stats_ir, "business")
+    # Client has other visible columns (e.g. Client Name) that were never profiled -
+    # those rows must not show a stray badge.
+    client_card_start = html.index('id="table-client"')
+    client_card = html[client_card_start : client_card_start + 4000]
+    assert client_card.count('class="chip cardinality-good"') == 1
+
+
 def test_questions_section_does_not_overclaim_dax_execution_when_none_exists(ir):
     # A narrative can legitimately answer questions with field guidance and no DAX at
     # all (safer than fabricating an unverified snippet). The section blurb must not

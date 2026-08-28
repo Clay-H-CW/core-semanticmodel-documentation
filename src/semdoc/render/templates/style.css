@@ -550,6 +550,34 @@ section {
 /* The concrete "what to actually build" answer — distinct from the neutral field chips
    sitting right next to it, since this is the one piece of build guidance a report
    author should not have to dig for. */
+.chip.cardinality-good {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.chip.cardinality-ok {
+  color: var(--text-muted);
+}
+
+.chip.cardinality-high {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+td.values {
+  white-space: nowrap;
+}
+
+.sample-values {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  white-space: normal;
+  max-width: 22rem;
+}
+
 .chip.visual-hint {
   color: var(--accent);
   border-color: var(--accent);
