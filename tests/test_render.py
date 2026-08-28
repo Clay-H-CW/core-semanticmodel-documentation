@@ -284,45 +284,74 @@ def test_table_groups_empty_input():
     assert groups == []
 
 
-def test_table_groups_splits_by_fact_dim_bridge_suffix():
+def test_table_groups_splits_by_last_underscore_word_when_that_convention_dominates():
     # Real naming convention seen across several models (e.g. Cwe_Enrollment_Fact,
-    # Cwe_Client_Dim, Cwe_Service_Type_Category_Bridge) — not the space-prefix style
-    # HMIS uses, so this needs its own coverage.
+    # Cwe_Client_Dim, Cwe_Service_Type_Category_Bridge, ST_Client_Attributes) — not the
+    # space-prefix style HMIS uses. "Dim" is relabeled "Dimension"; any other suffix
+    # (here "Attributes") passes through verbatim rather than being guessed at from a
+    # fixed vocabulary.
     from semdoc.ir.schema import Table
 
     fact = Table(name="Cwe_Enrollment_Fact")
     dim = Table(name="Cwe_Client_Dim")
     bridge = Table(name="Cwe_Service_Type_Category_Bridge")
-    other = Table(name="Time Period")
+    attributes = Table(name="ST_Client_Attributes")
 
-    _, groups = _table_groups([fact, dim, bridge, other])
+    _, groups = _table_groups([fact, dim, bridge, attributes])
     assert dict(groups) == {
         "Fact": [fact],
         "Dimension": [dim],
         "Bridge": [bridge],
-        "Time": [other],
+        "Attributes": [attributes],
     }
-    # Fact leads, then Dimension, then Bridge, ahead of any fallback prefix group.
-    assert [key for key, _ in groups] == ["Fact", "Dimension", "Bridge", "Time"]
+    # Fact leads, then Dimension, then Bridge, then any other suffix group alphabetically.
+    assert [key for key, _ in groups] == ["Fact", "Dimension", "Bridge", "Attributes"]
 
 
-def test_table_groups_suffix_match_requires_a_word_boundary():
-    # "ClientDim" runs the suffix straight into the preceding word with no separator —
-    # this project has only ever verified the underscore/space-separated convention
-    # (Cwe_Client_Dim, "Service Fact"), so a bare camelCase run must not be guessed at.
+def test_table_groups_suffix_convention_needs_a_majority_not_one_table():
+    # Three underscored outliers (HMIS's real Tool_YesNoOff, Tool_Percentages,
+    # Tool_Integers) among mostly space-prefixed tables must not flip the whole model
+    # into suffix mode and fragment it into one-table groups — the model as a whole
+    # decides which convention applies, not each table in isolation.
     from semdoc.ir.schema import Table
 
-    camel_case = Table(name="ClientDim")
-    _, groups = _table_groups([camel_case])
-    assert dict(groups) == {"General": [camel_case]}
+    tables = [
+        Table(name="hmis Enrollment"),
+        Table(name="hmis Exit"),
+        Table(name="hmis Project"),
+        Table(name="Tool_YesNoOff"),
+    ]
+    _, groups = _table_groups(tables)
+    assert dict(groups) == {
+        "hmis": [tables[0], tables[1], tables[2]],
+        "General": [tables[3]],
+    }
 
 
-def test_table_groups_bare_fact_dim_bridge_names_also_match():
+def test_table_groups_no_underscore_falls_back_to_general_in_suffix_mode():
+    # A table with no underscore at all, in a model that otherwise clearly uses the
+    # suffix convention, has no "last word after _" to group by.
+    from semdoc.ir.schema import Table
+
+    fact = Table(name="Cwe_Enrollment_Fact")
+    dim = Table(name="Cwe_Client_Dim")
+    no_underscore = Table(name="Time Period")
+
+    _, groups = _table_groups([fact, dim, no_underscore])
+    assert dict(groups) == {"Fact": [fact], "Dimension": [dim], "General": [no_underscore]}
+    # General sorts last among suffix groups — it's the leftover, not the headline.
+    assert [key for key, _ in groups] == ["Fact", "Dimension", "General"]
+
+
+def test_table_groups_bare_words_with_no_underscore_are_not_suffix_matches():
+    # "the last word after _" requires an actual underscore — a table bare-named "Fact"
+    # has no underscore at all, so it is not a suffix match on its own; with no other
+    # signal either, all three land together in the ordinary General fallback.
     from semdoc.ir.schema import Table
 
     tables = [Table(name="Fact"), Table(name="Dim"), Table(name="Bridge")]
     _, groups = _table_groups(tables)
-    assert [key for key, _ in groups] == ["Fact", "Dimension", "Bridge"]
+    assert dict(groups) == {"General": tables}
 
 
 def test_sidebar_pins_measure_hosting_table_and_groups_the_rest_by_prefix(ir):

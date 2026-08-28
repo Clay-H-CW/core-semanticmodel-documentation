@@ -96,24 +96,42 @@ def _report_usage_indexes(reports: list[ReportUsage]) -> tuple[dict[str, list[st
     return measures, columns
 
 
-_STRUCTURAL_SUFFIX = re.compile(r"(?:^|[_ ])(fact|dim|bridge)$", re.IGNORECASE)
-_STRUCTURAL_LABEL = {"fact": "Fact", "dim": "Dimension", "bridge": "Bridge"}
-_STRUCTURAL_ORDER = {"Fact": 0, "Dimension": 1, "Bridge": 2}
+_SUFFIX_LABEL_OVERRIDES = {"dim": "Dimension"}
+_SUFFIX_PRIORITY = {"Fact": 0, "Dimension": 1, "Bridge": 2}
+
+
+def _suffix_group_key(name: str) -> str:
+    """The group a table's name puts it in, under the underscore-suffix convention.
+
+    Whatever comes after the *last* underscore, verbatim — "Dim" is spelled out as
+    "Dimension" (the one relabel worth doing for readability), everything else (`Fact`,
+    `Bridge`, or some other structural role this project hasn't seen yet, e.g. `_Lookup`)
+    passes through as-is, trusting the model's own naming rather than guessing at a fixed
+    vocabulary. A name with no underscore at all falls to "General".
+    """
+    if "_" not in name:
+        return "General"
+    last = name.rsplit("_", 1)[-1].strip()
+    return _SUFFIX_LABEL_OVERRIDES.get(last.casefold(), last)
 
 
 def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
     """Split tables into pinned (measure-hosting) and grouped tables, for the sidebar.
 
-    A table whose name ends in `_Fact`/`_Dim`/`_Bridge` (or `Fact`/`Dim`/`Bridge` on its
-    own) is grouped by that structural role first — a warehouse-star-schema naming
-    convention this project has seen used consistently across several real models, and
-    the single most useful grouping for a report author once it's there: it says "slice
-    by this" vs. "measure this" before they've read a single description. Anything that
-    doesn't match falls back to the token before the table's first space (a different
-    real convention, e.g. "hmis Enrollment" / "hmis Exit"), or "General" for a name with
-    neither. The two schemes never fight each other: a model uses one or the other in
-    practice, never a mix, since a bare per-table check is all this does — there is no
-    per-model mode switch to get wrong.
+    Two real naming conventions exist across the models this project has documented:
+    a warehouse-style suffix ("Cwe_Enrollment_Fact", "Cwe_Client_Dim") and a prefix
+    before the first space (HMIS's "hmis Enrollment", "hmis Exit"). Which one applies is
+    decided once, for the model as a whole, by which convention actually explains most of
+    its tables — not per table, and not by name-checking the model itself. A model
+    genuinely on the suffix convention still has the odd exception (HMIS's own
+    `*HMIS_Measures` aside, a model like ServTracker's `ST_Client_Attributes` ends in
+    neither Fact nor Dim but is still grouped by its own last segment, "Attributes",
+    since the *model* is on that convention); the reverse also holds — HMIS has a
+    `Tool_YesNoOff` here and there, but three tables out of dozens doesn't make the whole
+    model suffix-organized, so all of HMIS groups by prefix instead. Getting this
+    per-model, majority-vote call wrong would fragment a mostly-prefix model into a
+    handful of one-table suffix groups, or vice versa — worse than either convention
+    applied consistently.
 
     A table that itself carries measures is pulled out and pinned above the groups
     instead of being alphabetized into one: it is architecturally a different kind of
@@ -124,20 +142,29 @@ def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, lis
     pinned = [t for t in tables if t.measures]
     rest = [t for t in tables if not t.measures]
 
+    uses_suffix_convention = bool(rest) and sum(1 for t in rest if "_" in t.name) > len(rest) / 2
+
     groups: dict[str, list[Table]] = {}
     for table in rest:
-        structural = _STRUCTURAL_SUFFIX.search(table.name)
-        if structural:
-            key = _STRUCTURAL_LABEL[structural.group(1).casefold()]
+        if uses_suffix_convention:
+            key = _suffix_group_key(table.name)
         else:
             prefix = table.name.split(" ", 1)[0] if " " in table.name else ""
             key = prefix or "General"
         groups.setdefault(key, []).append(table)
 
-    def sort_key(name: str) -> tuple:
-        if name in _STRUCTURAL_ORDER:
-            return (0, _STRUCTURAL_ORDER[name], "")
-        return (1, 0 if name == "General" else 1, name.casefold())
+    if uses_suffix_convention:
+
+        def sort_key(name: str) -> tuple:
+            if name == "General":
+                return (2, "")
+            if name in _SUFFIX_PRIORITY:
+                return (0, _SUFFIX_PRIORITY[name])
+            return (1, name.casefold())
+    else:
+
+        def sort_key(name: str) -> tuple:
+            return (0, "") if name == "General" else (1, name.casefold())
 
     ordered_keys = sorted(groups, key=sort_key)
     return pinned, [(key, groups[key]) for key in ordered_keys]
