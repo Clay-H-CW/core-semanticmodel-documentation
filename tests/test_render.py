@@ -831,7 +831,11 @@ def test_guide_shows_per_fact_diagrams_alongside_the_combined_one():
 def test_guide_shows_the_fact_relationship_map_when_facts_share_a_dimension():
     multi_ir = _multi_fact_ir()
     html = render_guide(multi_ir, "technical")
-    assert "Or see how the fact tables connect through shared dimensions" in html
+    # Collapsed by default, same mechanism as the per-fact entries.
+    assert "How the fact tables connect through shared dimensions" in html
+    start = html.index("How the fact tables connect through shared dimensions")
+    details_open = html.rindex("<details", 0, start)
+    assert "<details class=\"focus-group\">" in html[details_open : details_open + 40]
 
 
 def test_guide_shows_the_fact_dimension_matrix_table_alongside_the_diagram():
@@ -847,7 +851,7 @@ def test_guide_shows_the_fact_dimension_matrix_table_alongside_the_diagram():
 
 def test_guide_omits_the_fact_relationship_map_for_a_single_fact_model(ir):
     html = render_guide(ir, "technical")
-    assert "Or see how the fact tables connect through shared dimensions" not in html
+    assert "How the fact tables connect through shared dimensions" not in html
 
 
 def test_guide_has_no_per_fact_supplement_for_a_single_fact_model(ir):

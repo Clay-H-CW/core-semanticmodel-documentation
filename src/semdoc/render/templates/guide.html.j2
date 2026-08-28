@@ -362,35 +362,41 @@
           connect to. This keeps only dimensions genuinely shared by 2+ facts, which is
           what keeps it a small, readable map instead of the near-complete hairball a
           "shares any dimension" version turns into once client/date/provider-style
-          dimensions are counted. -#}
-      <div>
-        <p class="section-note">Or see how the fact tables connect through shared dimensions:</p>
-      </div>
-      {%- if fact_dimension_table %}
-      <div class="table-scroll">
-        <table class="matrix-table">
-          <thead>
-            <tr>
-              <th>Fact table</th>
-              {%- for dim in fact_dimension_table.dims %}
-              <th>{{ dim }}</th>
+          dimensions are counted. Collapsed by default, same mechanism as the per-fact
+          entries below — one more thing to open on demand rather than always-on-screen. -#}
+      <details class="focus-group">
+        <summary>
+          <span class="focus-group-label">How the fact tables connect through shared dimensions</span>
+          {%- if fact_dimension_table %}
+          <span class="nav-count">{{ fact_dimension_table.dims|length }}</span>
+          {%- endif %}
+        </summary>
+        {%- if fact_dimension_table %}
+        <div class="table-scroll">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th>Fact table</th>
+                {%- for dim in fact_dimension_table.dims %}
+                <th>{{ dim }}</th>
+                {%- endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {%- for fact in fact_dimension_table.facts %}
+              <tr>
+                <td class="type">{{ fact }}</td>
+                {%- for dim in fact_dimension_table.dims %}
+                <td class="matrix-mark">{{ "✓" if (fact, dim) in fact_dimension_table.marks else "" }}</td>
+                {%- endfor %}
+              </tr>
               {%- endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {%- for fact in fact_dimension_table.facts %}
-            <tr>
-              <td class="type">{{ fact }}</td>
-              {%- for dim in fact_dimension_table.dims %}
-              <td class="matrix-mark">{{ "✓" if (fact, dim) in fact_dimension_table.marks else "" }}</td>
-              {%- endfor %}
-            </tr>
-            {%- endfor %}
-          </tbody>
-        </table>
-      </div>
-      {%- endif %}
-      {{ diagram(fact_relationship_map, none, none) }}
+            </tbody>
+          </table>
+        </div>
+        {%- endif %}
+        {{ diagram(fact_relationship_map, none, none) }}
+      </details>
       {%- endif %}
 
       {%- if use_per_fact_diagrams %}
