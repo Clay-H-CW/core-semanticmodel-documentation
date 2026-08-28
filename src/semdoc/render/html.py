@@ -115,6 +115,46 @@ def _suffix_group_key(name: str) -> str:
     return _SUFFIX_LABEL_OVERRIDES.get(last.casefold(), last)
 
 
+def _per_fact_diagrams(
+    visible_tables: list[Table], ir: ModelIR, variant: str
+) -> tuple[bool, list[dict], list[dict]]:
+    """Per-fact-table diagram data for the collapsible split (see `docs/design.md`).
+
+    Splitting only kicks in once there is more than one fact table to separate — a
+    single-fact model has nothing meaningful to split, and its one combined diagram is
+    already legible. `label_hidden_columns` follows the same business/technical rule the
+    combined `star_schema` diagram already uses; lineage entries are only computed for
+    the technical variant, since the lineage section itself only ever renders there —
+    computing it for business would just be thrown away.
+    """
+    fact_tables = [t for t in visible_tables if t.kind is TableKind.FACT]
+    use_per_fact = len(fact_tables) > 1
+
+    per_fact_star: list[dict] = []
+    per_fact_lineage: list[dict] = []
+    if use_per_fact:
+        for table in fact_tables:
+            # Same relationship count `diagrams._focus_subset` uses to build the subset
+            # in the first place — "how many dimensions does this fact reach" is a far
+            # more useful summary-line number than the fact table's own column count.
+            related_count = sum(
+                1 for r in ir.model.relationships if r.from_table == table.name or r.to_table == table.name
+            )
+            star = diagrams.table_focus(
+                ir.model, table.name, label_hidden_columns=(variant == "technical")
+            )
+            if star:
+                per_fact_star.append({"table": table, "diagram": star, "related_count": related_count})
+            if variant == "technical":
+                lineage = diagrams.lineage_focus(ir, table.name)
+                if lineage:
+                    per_fact_lineage.append(
+                        {"table": table, "diagram": lineage, "related_count": related_count}
+                    )
+
+    return use_per_fact, per_fact_star, per_fact_lineage
+
+
 def _table_groups(tables: list[Table]) -> tuple[list[Table], list[tuple[str, list[Table]]]]:
     """Split tables into pinned (measure-hosting) and grouped tables, for the sidebar.
 
@@ -252,6 +292,9 @@ def _context(
 
     pinned_tables, table_groups = _table_groups(visible_tables)
     measure_report_usage, column_report_usage = _report_usage_indexes(ir.reports)
+    use_per_fact_diagrams, per_fact_star, per_fact_lineage = _per_fact_diagrams(
+        visible_tables, ir, variant
+    )
 
     return {
         "model": model,
@@ -291,6 +334,9 @@ def _context(
         ),
         "warehouse_lineage": diagrams.warehouse_lineage(ir),
         "measure_dependencies": diagrams.measure_dependencies(model),
+        "use_per_fact_diagrams": use_per_fact_diagrams,
+        "per_fact_star": per_fact_star,
+        "per_fact_lineage": per_fact_lineage,
         # Markup, not a plain str: autoescaping would turn `[data-theme="dark"]` into
         # `[data-theme=&quot;dark&quot;]` — an invalid selector the browser silently drops,
         # taking the dark theme and every quoted font-family with it. Both of these are

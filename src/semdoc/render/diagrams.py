@@ -187,10 +187,13 @@ def measure_dependencies(model: Model) -> str | None:
     return "\n".join(lines)
 
 
-def table_focus(model: Model, table_name: str) -> str | None:
-    """A single fact table with just the dimensions that reach it.
+def _focus_subset(model: Model, table_name: str) -> Model | None:
+    """`model` narrowed to `table_name` and everything directly related to it.
 
-    Large models produce an unreadable all-tables diagram; a per-fact view stays legible.
+    Shared by `table_focus` and `lineage_focus` — a per-fact slice means the same table
+    set to both of them, whether what's drawn from it afterward is a relationship diagram
+    or a lineage one. `None` when the table doesn't exist or has no relationships (nothing
+    to draw either way).
     """
     table = model.table(table_name)
     if table is None:
@@ -203,9 +206,37 @@ def table_focus(model: Model, table_name: str) -> str | None:
         return None
 
     names = {table_name} | {r.from_table for r in related} | {r.to_table for r in related}
-    subset = Model(
+    return Model(
         name=model.name,
         tables=[t for t in model.tables if t.name in names],
         relationships=related,
     )
-    return star_schema(subset)
+
+
+def table_focus(model: Model, table_name: str, *, label_hidden_columns: bool = True) -> str | None:
+    """A single fact table with just the dimensions that reach it.
+
+    Large models produce an unreadable all-tables diagram; a per-fact view stays legible.
+    `label_hidden_columns` matches `star_schema`'s own — needed here too, not just on the
+    combined diagram, so the business variant keeps hiding join-column labels a business
+    reader can't see anywhere else on the page either.
+    """
+    subset = _focus_subset(model, table_name)
+    if subset is None:
+        return None
+    return star_schema(subset, label_hidden_columns=label_hidden_columns)
+
+
+def lineage_focus(ir: ModelIR, table_name: str) -> str | None:
+    """Warehouse lineage narrowed to one fact table and the dimensions that reach it.
+
+    Same motivation and same table selection as `table_focus` — the combined lineage
+    diagram has the identical density problem (every model table listed twice, once per
+    subgraph), for the same reason: many dimensions sharing one fact's rank.
+    """
+    subset = _focus_subset(ir.model, table_name)
+    if subset is None:
+        return None
+    # Only `model` is required on ModelIR — warehouse_lineage never reads narrative,
+    # reports, or validation, so there is nothing else worth carrying into this subset.
+    return warehouse_lineage(ModelIR(model=subset))

@@ -621,10 +621,12 @@ td.values {
   background: var(--danger-soft);
 }
 
-/* Best Practice Analyzer findings, grouped by category. Same collapsible mechanism as
-   the sidebar's measure/table folders — closed by default so a model with many findings
-   doesn't turn this into a wall of rows. */
-.bpa-category {
+/* Best Practice Analyzer findings, grouped by category, and per-fact-table diagrams
+   below — same collapsible mechanism as the sidebar's measure/table folders, and as each
+   other: closed by default so a model with many findings, or many fact tables, doesn't
+   turn its section into a wall of rows or diagrams. */
+.bpa-category,
+.focus-group {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -632,7 +634,8 @@ td.values {
   overflow: hidden;
 }
 
-.bpa-category summary {
+.bpa-category summary,
+.focus-group summary {
   cursor: pointer;
   list-style: none;
   display: flex;
@@ -642,11 +645,13 @@ td.values {
   background: var(--surface-alt);
 }
 
-.bpa-category summary::-webkit-details-marker {
+.bpa-category summary::-webkit-details-marker,
+.focus-group summary::-webkit-details-marker {
   display: none;
 }
 
-.bpa-category summary::before {
+.bpa-category summary::before,
+.focus-group summary::before {
   content: "▸";
   flex: 0 0 auto;
   font-size: 0.7rem;
@@ -654,11 +659,13 @@ td.values {
   transition: transform 0.12s ease;
 }
 
-.bpa-category[open] summary::before {
+.bpa-category[open] summary::before,
+.focus-group[open] summary::before {
   transform: rotate(90deg);
 }
 
-.bpa-category-label {
+.bpa-category-label,
+.focus-group-label {
   font-weight: 600;
   font-size: 0.9375rem;
   flex: 1 1 auto;
@@ -668,6 +675,13 @@ td.values {
   border: none;
   border-radius: 0;
   border-top: 1px solid var(--border);
+}
+
+.focus-group .diagram {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+  box-shadow: none;
 }
 
 /* ---- cards ------------------------------------------------------------------------ */

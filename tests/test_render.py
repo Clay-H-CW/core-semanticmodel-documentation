@@ -22,7 +22,7 @@ from semdoc.ir.schema import (
     ValidationReport,
 )
 from semdoc.render import diagrams
-from semdoc.render.html import _table_groups, render_guide
+from semdoc.render.html import _per_fact_diagrams, _table_groups, render_guide
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sample_tmsl.json"
 
@@ -113,6 +113,30 @@ def test_measure_dependency_diagram_omitted_when_flat():
 def test_table_focus_returns_none_for_unrelated_table(ir):
     assert diagrams.table_focus(ir.model, "Targets") is None
     assert diagrams.table_focus(ir.model, "Nope") is None
+
+
+def test_table_focus_respects_label_hidden_columns(ir):
+    # ClientKey is a hidden join column (see the business-variant leak test elsewhere in
+    # this file) — the per-fact diagram must honor the same business/technical rule the
+    # combined star_schema diagram already does, not silently ignore it.
+    with_label = diagrams.table_focus(ir.model, "Service Fact", label_hidden_columns=True)
+    without_label = diagrams.table_focus(ir.model, "Service Fact", label_hidden_columns=False)
+    assert 'Client -- "ClientKey" --> Service_Fact' in with_label
+    assert 'Client -- "ClientKey" --> Service_Fact' not in without_label
+    assert "Client --> Service_Fact" in without_label
+
+
+def test_lineage_focus_returns_none_for_unrelated_or_unknown_table(ir):
+    assert diagrams.lineage_focus(ir, "Targets") is None
+    assert diagrams.lineage_focus(ir, "Nope") is None
+
+
+def test_lineage_focus_narrows_to_the_focused_tables_subset(ir):
+    mermaid = diagrams.lineage_focus(ir, "Service Fact")
+    assert 'wh_dbo_fact_service -- "DirectLake" --> sm_Service_Fact' in mermaid
+    # Targets has no relationship to Service Fact, so it has no place in this subset —
+    # not even as an unlinked node, the way it would in the full combined lineage diagram.
+    assert "sm_Targets" not in mermaid
 
 
 # -- html ------------------------------------------------------------------------------
@@ -685,3 +709,70 @@ def test_model_switcher_present_with_two_models_and_marks_current(ir):
 def test_chat_request_carries_the_current_model_slug(ir):
     html = render_guide(ir, "technical", model_slug="hmis-directlake")
     assert 'slug: "hmis-directlake"' in html
+
+
+# -- per-fact diagram split --------------------------------------------------------------
+
+
+def _multi_fact_ir():
+    from semdoc.ir.schema import Column, Model, Relationship, Table, TableKind
+
+    orders = Table(name="Orders", kind=TableKind.FACT, columns=[Column(name="CustomerId")])
+    shipments = Table(name="Shipments", kind=TableKind.FACT, columns=[Column(name="CustomerId")])
+    customer = Table(name="Customer", kind=TableKind.DIMENSION, columns=[Column(name="CustomerId")])
+    model = Model(
+        name="Multi",
+        tables=[orders, shipments, customer],
+        relationships=[
+            Relationship(
+                name="r1", from_table="Orders", from_column="CustomerId",
+                to_table="Customer", to_column="CustomerId",
+            ),
+            Relationship(
+                name="r2", from_table="Shipments", from_column="CustomerId",
+                to_table="Customer", to_column="CustomerId",
+            ),
+        ],
+    )
+    return ModelIR(model=model)
+
+
+def _visible(ir_obj):
+    return [t for t in ir_obj.model.tables if not t.is_hidden]
+
+
+def test_per_fact_diagrams_off_for_a_single_fact_model(ir):
+    # Fixture has exactly one fact table (Service Fact) — nothing to split.
+    use_split, star, lineage = _per_fact_diagrams(_visible(ir), ir, "technical")
+    assert use_split is False
+    assert star == []
+    assert lineage == []
+
+
+def test_per_fact_diagrams_on_for_a_multi_fact_model():
+    multi_ir = _multi_fact_ir()
+    use_split, star, lineage = _per_fact_diagrams(_visible(multi_ir), multi_ir, "technical")
+    assert use_split is True
+    assert {e["table"].name for e in star} == {"Orders", "Shipments"}
+    assert all(e["related_count"] == 1 for e in star)
+
+
+def test_per_fact_diagrams_skip_lineage_for_business_variant():
+    multi_ir = _multi_fact_ir()
+    use_split, star, lineage = _per_fact_diagrams(_visible(multi_ir), multi_ir, "business")
+    assert use_split is True
+    assert star  # relationship diagrams still apply to business
+    assert lineage == []  # the lineage section itself never renders for business
+
+
+def test_guide_renders_collapsible_diagrams_for_a_multi_fact_model():
+    multi_ir = _multi_fact_ir()
+    html = render_guide(multi_ir, "technical")
+    assert html.count('class="focus-group"') >= 2
+    assert "Orders" in html
+    assert "Shipments" in html
+
+
+def test_guide_keeps_the_combined_diagram_for_a_single_fact_model(ir):
+    html = render_guide(ir, "technical")
+    assert 'class="focus-group"' not in html

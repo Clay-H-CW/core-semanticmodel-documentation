@@ -353,11 +353,25 @@
         <li><span class="chip date-table">date table</span> the official calendar — filter dates through this one</li>
         <li><span class="chip disconnected">disconnected</span> not linked to anything — a slicer here won't filter your report</li>
       </ul>
-      {{ diagram(
-        star_schema,
-        none,
-        'Solid arrow: active relationship &middot; Dashed: inactive, needs <code>USERELATIONSHIP</code> &middot; Double arrow: filters both ways'
-      ) }}
+      {%- set edge_caption = 'Solid arrow: active relationship &middot; Dashed: inactive, needs <code>USERELATIONSHIP</code> &middot; Double arrow: filters both ways' %}
+      {%- if not use_per_fact_diagrams %}
+      {{ diagram(star_schema, none, edge_caption) }}
+      {%- else %}
+      {#- More than one fact table: one combined diagram would be an unreadable wall of
+          dimensions all sharing the same rank. A collapsed-by-default entry per fact
+          table stays legible and lets a reader open only the one they're building
+          against — same mechanism as the Best Practice Findings categories below. -#}
+      <p class="diagram-caption">{{ edge_caption|safe }}</p>
+      {%- for entry in per_fact_star %}
+      <details class="focus-group">
+        <summary>
+          <span class="focus-group-label">{{ entry.table.name }}</span>
+          <span class="nav-count">{{ entry.related_count }}</span>
+        </summary>
+        {{ diagram(entry.diagram, none, none) }}
+      </details>
+      {%- endfor %}
+      {%- endif %}
 
       {%- if disconnected_tables %}
       <div class="caution">
@@ -702,7 +716,19 @@
           DAX expression have no warehouse source.
         </p>
       </div>
+      {%- if not use_per_fact_diagrams %}
       {{ diagram(warehouse_lineage, none, none) }}
+      {%- else %}
+      {%- for entry in per_fact_lineage %}
+      <details class="focus-group">
+        <summary>
+          <span class="focus-group-label">{{ entry.table.name }}</span>
+          <span class="nav-count">{{ entry.related_count }}</span>
+        </summary>
+        {{ diagram(entry.diagram, none, none) }}
+      </details>
+      {%- endfor %}
+      {%- endif %}
     </section>
 
     <!-- Best Practice Findings -->
