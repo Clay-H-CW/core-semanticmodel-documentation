@@ -308,7 +308,14 @@ def _resolve_measure_dependencies(model: Model) -> None:
             ]
 
 
-def tmsl_to_model(tmsl: dict, *, name: str, workspace: str | None = None, model_id: str | None = None) -> Model:
+def tmsl_to_model(
+    tmsl: dict,
+    *,
+    name: str,
+    workspace: str | None = None,
+    workspace_id: str | None = None,
+    model_id: str | None = None,
+) -> Model:
     """Convert a parsed `model.bim` document into the IR `Model`."""
     body = tmsl.get("model", tmsl)
 
@@ -327,6 +334,7 @@ def tmsl_to_model(tmsl: dict, *, name: str, workspace: str | None = None, model_
     model = Model(
         name=name,
         workspace=workspace,
+        workspace_id=workspace_id,
         id=model_id,
         description=_joined(body.get("description")),
         culture=body.get("culture"),

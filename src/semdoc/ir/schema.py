@@ -221,6 +221,10 @@ class BpaFinding(IRBase):
 class Model(IRBase):
     name: str
     workspace: str | None = None
+    # The workspace's GUID, not its display name — needed to call executeQueries for the
+    # stats pass. Kept alongside `workspace` (the display name) rather than replacing it,
+    # since the name is what a reader wants to see and the id is what an API call needs.
+    workspace_id: str | None = None
     id: str | None = None
     description: str | None = None
     culture: str | None = None
@@ -311,14 +315,25 @@ class AnsweredQuestion(IRBase):
     question: str
     approach: str
     fields: list[Ref] = Field(default_factory=list)
+    # A visual type hint (e.g. "Card", "Bar chart", "Table") — matches ReportRecipe.visual
+    # so both answer forms in the guide give the same kind of concrete build guidance.
+    visual: str | None = None
     dax: str | None = None
     # Set by `validate.dax` after actually running the snippet against the model.
     dax_verified: bool | None = None
 
 
 class Gotcha(IRBase):
-    title: str
-    detail: str
+    """A troubleshooting entry, framed from what the reader notices, not the mechanism.
+
+    Deliberately three separate fields rather than one title+paragraph: a report author
+    hunting down a wrong number is scanning for their symptom first, and wants the fix
+    without having to parse it back out of prose explaining the cause.
+    """
+
+    symptom: str
+    cause: str
+    fix: str
     affects: list[Ref] = Field(default_factory=list)
 
 
@@ -343,6 +358,11 @@ class Narrative(IRBase):
     questions_answered: list[AnsweredQuestion] = Field(default_factory=list)
     gotchas: list[Gotcha] = Field(default_factory=list)
     report_recipes: list[ReportRecipe] = Field(default_factory=list)
+    # Term -> plain-English definition. Domain acronyms (e.g. HMIS's own CMF, PIT, CoC)
+    # and modeling jargon a report author will hit but that isn't itself a model
+    # identifier, so it has no place in `validate_identifiers` — there is nothing to
+    # resolve it against.
+    glossary: dict[str, str] = Field(default_factory=dict)
 
 
 class ValidationReport(IRBase):

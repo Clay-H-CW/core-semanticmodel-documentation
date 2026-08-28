@@ -46,8 +46,9 @@ def test_valid_narrative_passes_with_zero_failures(model):
         ],
         gotchas=[
             Gotcha(
-                title="Inactive relationship",
-                detail="Enrollment Date needs USERELATIONSHIP.",
+                symptom="My total looks wrong when I use Enrollment Date.",
+                cause="The relationship on Enrollment Date is inactive.",
+                fix="Use USERELATIONSHIP in a measure to activate it.",
                 affects=[Ref(table="Service Fact", column="Enrollment Date")],
             )
         ],
@@ -85,8 +86,9 @@ def test_unknown_column_in_a_ref_is_caught(model):
     narrative = Narrative(
         gotchas=[
             Gotcha(
-                title="x",
-                detail="x",
+                symptom="x",
+                cause="x",
+                fix="x",
                 affects=[Ref(table="Service Fact", column="NotARealColumn")],
             )
         ]
@@ -109,7 +111,7 @@ def test_unknown_measure_in_a_ref_is_caught(model):
 def test_table_only_ref_is_valid_without_a_column(model):
     # Gotchas often refer to a whole table (e.g. "no relationships"), not a column.
     narrative = Narrative(
-        gotchas=[Gotcha(title="x", detail="x", affects=[Ref(table="Targets")])]
+        gotchas=[Gotcha(symptom="x", cause="x", fix="x", affects=[Ref(table="Targets")])]
     )
     report = validate_identifiers(model, narrative)
     assert report.ok

@@ -129,6 +129,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         tmsl,
         name=sm["displayName"],
         workspace=ws["displayName"],
+        workspace_id=ws["id"],
         model_id=sm["id"],
     )
     ir = ModelIR(

@@ -104,6 +104,9 @@
     <div class="nav-group">
       <span class="nav-label">Start here</span>
       <a href="#overview">Overview</a>
+      {%- if narrative and narrative.glossary %}
+      <a href="#glossary">Glossary<span class="nav-count">{{ narrative.glossary|length }}</span></a>
+      {%- endif %}
       {%- if narrative and narrative.questions_answered %}
       <a href="#questions">What you can answer<span class="nav-count">{{ narrative.questions_answered|length }}</span></a>
       {%- endif %}
@@ -227,6 +230,24 @@
       {%- endif %}
     </section>
 
+    {%- if narrative and narrative.glossary %}
+    <section id="glossary">
+      <div>
+        <p class="eyebrow">Reference</p>
+        <h2 class="section-title">Glossary</h2>
+        <p class="section-note">
+          Terms and acronyms used throughout this guide. {{ provenance("generated") }}
+        </p>
+      </div>
+      <dl class="glossary-grid">
+        {%- for term, definition in narrative.glossary|dictsort %}
+        <dt>{{ term }}</dt>
+        <dd>{{ definition }}</dd>
+        {%- endfor %}
+      </dl>
+    </section>
+    {%- endif %}
+
     {#- Questions come before structure: a report author arrives with a requirement, not
         with curiosity about the schema. -#}
     {%- if narrative and narrative.questions_answered %}
@@ -249,6 +270,7 @@
         {%- for item in narrative.questions_answered %}
         <li class="qa-item">
           <p class="question">{{ item.question }}</p>
+          {%- if item.visual %}<span class="chip visual-hint">{{ item.visual }}</span>{% endif %}
           <p class="approach">{{ item.approach }}</p>
           {{ ref_chips(item.fields) }}
           {%- if item.dax %}
@@ -278,6 +300,13 @@
           filters everything downstream of it.
         </p>
       </div>
+      <ul class="chip-legend">
+        <li><span class="chip fact">fact</span> events or transactions — the thing being measured</li>
+        <li><span class="chip dimension">dimension</span> attributes you filter or group by</li>
+        <li><span class="chip bridge">bridge</span> connects two tables, usually with no attributes of its own</li>
+        <li><span class="chip date-table">date table</span> the official calendar — filter dates through this one</li>
+        <li><span class="chip disconnected">disconnected</span> not linked to anything — a slicer here won't filter your report</li>
+      </ul>
       {{ diagram(
         star_schema,
         none,
@@ -321,12 +350,19 @@
       {%- for gotcha in narrative.gotchas %}
       <div class="card">
         <div class="card-header">
-          <h3 class="entry-title">{{ gotcha.title }}</h3>
+          <h3 class="entry-title">{{ gotcha.symptom }}</h3>
           <span class="spacer"></span>
           {{ provenance("generated") }}
         </div>
         <div class="card-body">
-          <p>{{ gotcha.detail }}</p>
+          <div class="dax-block">
+            <span class="dax-label">Cause</span>
+            <p>{{ gotcha.cause }}</p>
+          </div>
+          <div class="dax-block">
+            <span class="dax-label">Fix</span>
+            <p>{{ gotcha.fix }}</p>
+          </div>
           {{ ref_chips(gotcha.affects) }}
         </div>
       </div>
@@ -510,7 +546,7 @@
       <div class="card">
         <div class="card-header">
           <h3 class="entry-title">{{ recipe.requirement }}</h3>
-          {%- if recipe.visual %}<span class="chip">{{ recipe.visual }}</span>{% endif %}
+          {%- if recipe.visual %}<span class="chip visual-hint">{{ recipe.visual }}</span>{% endif %}
           <span class="spacer"></span>
           {{ provenance("generated") }}
         </div>

@@ -13,10 +13,12 @@ import pytest
 from semdoc.ir.build import tmsl_to_model
 from semdoc.ir.schema import (
     AnsweredQuestion,
+    Gotcha,
     MeasureNarrative,
     ModelIR,
     Narrative,
     Ref,
+    ReportRecipe,
     ValidationReport,
 )
 from semdoc.render import diagrams
@@ -48,10 +50,29 @@ def enriched_ir(ir):
                         question="How many units did each program deliver last quarter?",
                         approach="Put Program Name on rows and Total Units in values.",
                         fields=[Ref(table="Program", column="Program Name")],
+                        visual="Bar chart",
                         dax="EVALUATE ROW ( \"u\", [Total Units] )",
                         dax_verified=True,
                     )
                 ],
+                gotchas=[
+                    Gotcha(
+                        symptom="My total changes when I add Enrollment Date to a visual.",
+                        cause="The relationship on Enrollment Date is inactive.",
+                        fix="Use USERELATIONSHIP in a measure to activate it.",
+                        affects=[Ref(table="Service Fact", column="Enrollment Date")],
+                    )
+                ],
+                report_recipes=[
+                    ReportRecipe(
+                        requirement="Units delivered by program",
+                        visual="Stacked bar",
+                        measures=[Ref(measure="Total Units")],
+                    )
+                ],
+                glossary={
+                    "RLS": "Row-level security — restricts which rows a user can see.",
+                },
             ),
             "validation": ValidationReport(identifiers_checked=4, dax_snippets_checked=1),
         }
@@ -346,6 +367,43 @@ def test_narrative_with_failed_validation_is_flagged_not_verified(ir):
 def test_generated_dax_shows_execution_result(enriched_ir):
     html = render_guide(enriched_ir, "business")
     assert "executed successfully" in html
+
+
+def test_gotcha_renders_symptom_cause_and_fix_as_separate_labeled_parts(enriched_ir):
+    html = render_guide(enriched_ir, "business")
+    assert "My total changes when I add Enrollment Date to a visual." in html
+    assert "The relationship on Enrollment Date is inactive." in html
+    assert "Use USERELATIONSHIP in a measure to activate it." in html
+    assert ">Cause<" in html
+    assert ">Fix<" in html
+
+
+def test_answered_question_shows_visual_hint(enriched_ir):
+    html = render_guide(enriched_ir, "business")
+    assert 'class="chip visual-hint">Bar chart</span>' in html
+
+
+def test_report_recipe_shows_visual_hint(enriched_ir):
+    html = render_guide(enriched_ir, "business")
+    assert 'class="chip visual-hint">Stacked bar</span>' in html
+
+
+def test_glossary_renders_sorted_terms(enriched_ir):
+    html = render_guide(enriched_ir, "business")
+    assert '<dt>RLS</dt>' in html
+    assert "restricts which rows a user can see" in html
+
+
+def test_glossary_omitted_when_narrative_has_none(ir):
+    html = render_guide(ir, "business")
+    assert 'id="glossary"' not in html
+
+
+def test_data_model_section_includes_chip_legend_in_both_variants(ir):
+    for variant in ("technical", "business"):
+        html = render_guide(ir, variant)
+        assert "chip-legend" in html
+        assert "the thing being measured" in html
 
 
 def test_questions_section_does_not_overclaim_dax_execution_when_none_exists(ir):
