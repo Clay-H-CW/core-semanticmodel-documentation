@@ -66,6 +66,14 @@ def _build_query(table_name: str, columns: list[Column], sample_threshold: int) 
     """One EVALUATE ROW(...) computing cardinality (and, below the threshold, a sample
     string) for every column in this chunk. A VAR per column means DISTINCTCOUNT is
     computed once and reused for both the cardinality value and the sample-size gate.
+
+    Sample values are skipped entirely for DateTime columns. Found the hard way against a
+    real warehouse: CONCATENATEX has to convert every distinct value to text to build the
+    sample string, and a single corrupt/sentinel date outside 1899-12-30..9999-12-31 (the
+    transport range executeQueries serializes through) fails the *entire* query — not just
+    that column. DISTINCTCOUNT never formats a value, so cardinality is unaffected. Sample
+    dates are not a useful "good slicer" signal anyway (a range slicer is the right control
+    for a date column, not a value list), so there is nothing lost by skipping them.
     """
     var_lines = []
     row_args = []
@@ -75,12 +83,14 @@ def _build_query(table_name: str, columns: list[Column], sample_threshold: int) 
         var_lines.append(f"VAR {var_name} = DISTINCTCOUNT({ref})")
 
         card_key = _dax_string_literal(f"{col.name}__card")
-        sample_key = _dax_string_literal(f"{col.name}__sample")
         row_args.append(f"{card_key}, {var_name}")
-        row_args.append(
-            f"{sample_key}, IF({var_name} <= {sample_threshold}, "
-            f'CONCATENATEX(VALUES({ref}), {ref}, "{_SAMPLE_DELIMITER}"))'
-        )
+
+        if col.data_type.casefold() != "datetime":
+            sample_key = _dax_string_literal(f"{col.name}__sample")
+            row_args.append(
+                f"{sample_key}, IF({var_name} <= {sample_threshold}, "
+                f'CONCATENATEX(VALUES({ref}), {ref}, "{_SAMPLE_DELIMITER}"))'
+            )
 
     body = ",\n    ".join(row_args)
     return "EVALUATE\n" + "\n".join(var_lines) + f"\nRETURN\nROW(\n    {body}\n)"
@@ -111,12 +121,15 @@ def extract_column_stats(
     client: FabricClient,
     *,
     sample_threshold: int = DEFAULT_SAMPLE_THRESHOLD,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Populate `cardinality`/`sample_values` on every profilable column, in place.
 
-    Returns the list of "table.column" identifiers that could not be profiled (a query
-    error on that chunk) — surfaced so the caller can report them rather than have a
-    column's stats silently stay empty with no indication why.
+    Returns (identifier, reason) for every "table.column" that could not be profiled.
+    The reason matters, not just the fact of failure: a chunk-wide query error (a bad
+    denominator column, a data-quality problem in the warehouse) looks identical to an
+    empty result unless the actual message is kept — and re-deriving it after the fact
+    means re-running the query by hand, which is exactly what happened once already
+    while building this.
     """
     if not (model.workspace_id and model.id):
         raise StatsError(
@@ -124,18 +137,18 @@ def extract_column_stats(
             "older IRs predate this and won't have it."
         )
 
-    failed: list[str] = []
+    failed: list[tuple[str, str]] = []
     for table, columns in profilable_columns(model):
         for chunk in _chunk(columns, _CHUNK_SIZE):
             query = _build_query(table.name, chunk, sample_threshold)
             try:
                 rows = client.execute_dax(model.workspace_id, model.id, query)
-            except FabricError:
-                failed.extend(f"{table.name}.{c.name}" for c in chunk)
+            except FabricError as exc:
+                failed.extend((f"{table.name}.{c.name}", str(exc)) for c in chunk)
                 continue
             if rows:
                 _apply_result_row(chunk, rows[0])
             else:
-                failed.extend(f"{table.name}.{c.name}" for c in chunk)
+                failed.extend((f"{table.name}.{c.name}", "empty result") for c in chunk)
 
     return failed

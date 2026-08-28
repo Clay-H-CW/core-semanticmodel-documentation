@@ -78,6 +78,19 @@ def test_build_query_uses_the_given_sample_threshold():
     assert "__c0 <= 7" in query
 
 
+def test_build_query_skips_sample_fetch_for_datetime_columns():
+    # Found against a real warehouse: CONCATENATEX has to convert every distinct value to
+    # text, and a single out-of-range/corrupt date fails the *entire* query, not just
+    # that column. DISTINCTCOUNT never formats a value, so cardinality is unaffected.
+    cols = [Column(name="EntryDate", data_type="dateTime"), Column(name="County", data_type="string")]
+    query = _build_query("T", cols, sample_threshold=50)
+    assert "EntryDate__card" in query
+    assert "EntryDate__sample" not in query
+    assert "County__card" in query
+    assert "County__sample" in query
+    assert "CONCATENATEX(VALUES('T'[EntryDate])" not in query
+
+
 # -- result parsing --------------------------------------------------------------------
 
 

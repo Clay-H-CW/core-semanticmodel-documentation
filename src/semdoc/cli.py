@@ -239,8 +239,16 @@ def cmd_stats_extract(args: argparse.Namespace) -> int:
         return 5
 
     print(f"  {profilable - len(failed)} column(s) profiled, {len(failed)} failed", file=sys.stderr)
-    for name in failed:
-        print(f"    FAILED: {name}", file=sys.stderr)
+    if failed:
+        # Grouped by reason, not printed one-by-one: a single bad query fails an entire
+        # chunk with the same message repeated across every column in it.
+        by_reason: dict[str, list[str]] = {}
+        for name, reason in failed:
+            by_reason.setdefault(reason, []).append(name)
+        for reason, names in by_reason.items():
+            print(f"    FAILED ({len(names)}): {reason[:300]}", file=sys.stderr)
+            for name in names:
+                print(f"      - {name}", file=sys.stderr)
 
     _write_ir(ir, ir_path)
     print(f"Column stats attached -> {ir_path}")
