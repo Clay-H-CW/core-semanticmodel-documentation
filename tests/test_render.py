@@ -765,14 +765,18 @@ def test_per_fact_diagrams_skip_lineage_for_business_variant():
     assert lineage == []  # the lineage section itself never renders for business
 
 
-def test_guide_renders_collapsible_diagrams_for_a_multi_fact_model():
+def test_guide_shows_per_fact_diagrams_alongside_the_combined_one():
     multi_ir = _multi_fact_ir()
     html = render_guide(multi_ir, "technical")
+    # The combined whole-model diagram stays — per-fact is a supplement, not a
+    # replacement — plus one collapsible entry per fact table in each section.
+    assert "Or focus on one fact table at a time" in html
     assert html.count('class="focus-group"') >= 2
     assert "Orders" in html
     assert "Shipments" in html
 
 
-def test_guide_keeps_the_combined_diagram_for_a_single_fact_model(ir):
+def test_guide_has_no_per_fact_supplement_for_a_single_fact_model(ir):
     html = render_guide(ir, "technical")
     assert 'class="focus-group"' not in html
+    assert "Or focus on one fact table at a time" not in html

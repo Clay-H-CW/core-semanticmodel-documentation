@@ -354,14 +354,17 @@
         <li><span class="chip disconnected">disconnected</span> not linked to anything — a slicer here won't filter your report</li>
       </ul>
       {%- set edge_caption = 'Solid arrow: active relationship &middot; Dashed: inactive, needs <code>USERELATIONSHIP</code> &middot; Double arrow: filters both ways' %}
-      {%- if not use_per_fact_diagrams %}
       {{ diagram(star_schema, none, edge_caption) }}
-      {%- else %}
-      {#- More than one fact table: one combined diagram would be an unreadable wall of
-          dimensions all sharing the same rank. A collapsed-by-default entry per fact
-          table stays legible and lets a reader open only the one they're building
-          against — same mechanism as the Best Practice Findings categories below. -#}
-      <p class="diagram-caption">{{ edge_caption|safe }}</p>
+
+      {%- if use_per_fact_diagrams %}
+      {#- More than one fact table: the whole-model diagram above still shows the full
+          picture (pan/zoom makes that navigable now), but a wall of dimensions all
+          sharing one fact's rank is still a lot to read at once. This is the same
+          content, one fact table at a time — same collapsed-by-default mechanism as the
+          Best Practice Findings categories below. -#}
+      <div>
+        <p class="section-note">Or focus on one fact table at a time:</p>
+      </div>
       {%- for entry in per_fact_star %}
       <details class="focus-group">
         <summary>
@@ -716,9 +719,12 @@
           DAX expression have no warehouse source.
         </p>
       </div>
-      {%- if not use_per_fact_diagrams %}
       {{ diagram(warehouse_lineage, none, none) }}
-      {%- else %}
+
+      {%- if use_per_fact_diagrams %}
+      <div>
+        <p class="section-note">Or focus on one fact table at a time:</p>
+      </div>
       {%- for entry in per_fact_lineage %}
       <details class="focus-group">
         <summary>
