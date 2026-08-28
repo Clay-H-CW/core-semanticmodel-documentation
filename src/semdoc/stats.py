@@ -117,7 +117,16 @@ def _apply_result_row(columns: list[Column], row: dict) -> None:
             col.cardinality = int(cardinality)
 
         sample = _row_value(row, f"{col_name}__sample")
-        col.sample_values = sample.split(_SAMPLE_DELIMITER) if sample else []
+        if sample:
+            # Blank/null is a real distinct value (it counts toward cardinality, and
+            # shows up as its own slicer option in Power BI) but is not an illustrative
+            # *example* — "e.g. No, Yes, " with a trailing blank reads as a mistake, not
+            # a fact about the data. Capped well below the sample threshold: only the
+            # first three are ever displayed, so storing up to the threshold's worth
+            # (50 by default) in the IR is pure waste.
+            col.sample_values = [v for v in sample.split(_SAMPLE_DELIMITER) if v][:10]
+        else:
+            col.sample_values = []
 
 
 def extract_column_stats(

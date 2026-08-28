@@ -116,6 +116,25 @@ def test_apply_result_row_sets_cardinality_and_samples():
     assert columns[1].sample_values == []
 
 
+def test_apply_result_row_drops_blank_values_from_samples():
+    # A real result from the HMIS model: a nullable Yes/No column returns an empty
+    # string for the blank/unanswered rows, which is a real distinct value (it counts
+    # toward cardinality) but not something worth showing as an "e.g." example.
+    columns = [Column(name="ContinuumProject")]
+    row = {"ContinuumProject__card": 3, "ContinuumProject__sample": "No|~|Yes|~|"}
+    _apply_result_row(columns, row)
+    assert columns[0].cardinality == 3
+    assert columns[0].sample_values == ["No", "Yes"]
+
+
+def test_apply_result_row_caps_stored_samples_at_ten():
+    columns = [Column(name="A")]
+    many_values = "|~|".join(str(i) for i in range(30))
+    _apply_result_row(columns, {"A__card": 30, "A__sample": many_values})
+    assert len(columns[0].sample_values) == 10
+    assert columns[0].sample_values == [str(i) for i in range(10)]
+
+
 def test_apply_result_row_handles_bracket_wrapped_keys():
     # A real quirk of the executeQueries endpoint: ROW()-produced names sometimes come
     # back wrapped in brackets rather than bare.
